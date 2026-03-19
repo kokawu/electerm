@@ -846,6 +846,22 @@ class Term extends Component {
     term.loadAddon(this.cmdAddon)
     term.onData(this.onData)
     this.term = term
+
+    // OSC52: Allow remote applications (tmux, vim, etc.) to copy to clipboard
+    // https://github.com/tmux/tmux/wiki/Clipboard#the-clipboard
+    if (term.parser && term.parser.setOscHandler) {
+      term.parser.setOscHandler(52, (data) => {
+        const parts = data.split(';')
+        if (parts.length >= 2) {
+          const base64Data = parts[1]
+          if (base64Data && base64Data !== '?') {
+            const decoded = atob(base64Data)
+            window.pre.writeClipboard(decoded)
+          }
+        }
+      })
+    }
+
     term.onSelectionChange(this.onSelectionChange)
     term.attachCustomKeyEventHandler(this.handleKeyboardEvent.bind(this))
     await this.remoteInit(term)
