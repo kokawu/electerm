@@ -3,9 +3,13 @@ name: Build Windows with OSC52
 on:
   push:
     branches: [ main, master, osc52 ]
+    tags: [ 'v*' ]
   pull_request:
     branches: [ main, master ]
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build-windows:
