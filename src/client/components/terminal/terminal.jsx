@@ -82,6 +82,8 @@ class Term extends Component {
     this.currentInput = ''
     this.shellInjected = false
     this.shellType = null
+    this.osc52Decoder = new TextDecoder('utf-8')
+    this.osc52Disposable = null
   }
 
   domRef = createRef()
@@ -153,6 +155,10 @@ class Term extends Component {
       this.socket.close()
       this.socket = null
     }
+    if (this.osc52Disposable) {
+      this.osc52Disposable.dispose()
+      this.osc52Disposable = null
+    }
     if (this.term) {
       this.term.dispose()
       this.term = null
@@ -165,10 +171,51 @@ class Term extends Component {
     this.fitAddon = null
     this.cmdAddon = null
     this.imageAddon = null
+    this.osc52Decoder = null
     // Clear the notification if it exists
     if (this.socketCloseWarning) {
       notification.destroy(this.socketCloseWarning.key)
       this.socketCloseWarning = null
+    }
+  }
+
+  handleOsc52 = (data) => {
+    try {
+      const separatorIndex = data.indexOf(';')
+      if (separatorIndex === -1) {
+        return true
+      }
+      const base64Data = data.substring(separatorIndex + 1).replace(/\s/g, '')
+      if (base64Data === '?') {
+        return true
+      }
+      if (!base64Data) {
+        window.pre.writeClipboard('')
+        return true
+      }
+      const bytes = Uint8Array.from(atob(base64Data), char => char.charCodeAt(0))
+      const decoded = this.osc52Decoder.decode(bytes)
+      window.pre.writeClipboard(decoded)
+    } catch (err) {
+      console.error('OSC52 clipboard handling failed', err)
+    }
+    return true
+  }
+
+  registerOsc52Handler = (term) => {
+    if (!term.parser) {
+      return
+    }
+    if (this.osc52Disposable) {
+      this.osc52Disposable.dispose()
+      this.osc52Disposable = null
+    }
+    if (term.parser.registerOscHandler) {
+      this.osc52Disposable = term.parser.registerOscHandler(52, this.handleOsc52)
+      return
+    }
+    if (term.parser.setOscHandler) {
+      term.parser.setOscHandler(52, this.handleOsc52)
     }
   }
 
@@ -849,18 +896,7 @@ class Term extends Component {
 
     // OSC52: Allow remote applications (tmux, vim, etc.) to copy to clipboard
     // https://github.com/tmux/tmux/wiki/Clipboard#the-clipboard
-    if (term.parser && term.parser.setOscHandler) {
-      term.parser.setOscHandler(52, (data) => {
-        const parts = data.split(';')
-        if (parts.length >= 2) {
-          const base64Data = parts[1]
-          if (base64Data && base64Data !== '?') {
-            const decoded = atob(base64Data)
-            window.pre.writeClipboard(decoded)
-          }
-        }
-      })
-    }
+    this.registerOsc52Handler(term)
 
     term.onSelectionChange(this.onSelectionChange)
     term.attachCustomKeyEventHandler(this.handleKeyboardEvent.bind(this))
