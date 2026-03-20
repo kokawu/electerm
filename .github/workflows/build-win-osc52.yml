@@ -53,8 +53,7 @@ jobs:
 
     - name: Build Windows installer
       env:
-        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        WORKFLOW_NAME: ${{ github.workflow }}
+        ELECTRON_BUILDER_PUBLISH_MODE: never
       run: node build/bin/build-win-nsis
 
     - name: Upload Windows artifacts
