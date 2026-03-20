@@ -54,6 +54,7 @@ jobs:
     - name: Build Windows installer
       env:
         ELECTRON_BUILDER_PUBLISH_MODE: never
+        WORKFLOW_NAME: ${{ github.workflow }}
       run: node build/bin/build-win-nsis
 
     - name: Upload Windows artifacts
