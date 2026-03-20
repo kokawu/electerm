@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   build-windows:
-    runs-on: windows-latest
+    runs-on: windows-2022
 
     steps:
     - name: Checkout code
@@ -22,26 +22,52 @@ jobs:
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
-        node-version: '20'
-        cache: 'npm'
+        node-version: '22.x'
+
+    - name: Setup Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.7'
+        architecture: 'x64'
+
+    - name: Configure npm
+      run: npm config set legacy-peer-deps true
+
+    - name: Install build tools
+      run: |
+        npm install -g node-gyp
+        npm install -g yarn
 
     - name: Install dependencies
-      run: npm install --legacy-peer-deps
+      run: |
+        npm un node-pty serialport
+        npm i
+        npm i -S -E node-pty@1.1.0-beta14
+        npm i -S -E serialport@13.0.0
 
-    - name: Build application
+    - name: Prepare application files
       run: npm run b
+
+    - name: Prepare electron-builder config
+      run: npm run pb
+
+    - name: Build Windows installer
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        WORKFLOW_NAME: ${{ github.workflow }}
+      run: node build/bin/build-win-nsis
 
     - name: Upload Windows artifacts
       uses: actions/upload-artifact@v4
       with:
         name: electerm-windows-osc52
-        path: dist/
+        path: dist/**/*.exe
         retention-days: 30
 
     - name: Create Release
       if: startsWith(github.ref, 'refs/tags/')
       uses: softprops/action-gh-release@v1
       with:
-        files: dist/**/*
+        files: dist/**/*.exe
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
