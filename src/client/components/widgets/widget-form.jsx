@@ -1,13 +1,30 @@
 /**
  * Widget form component
  */
-import React from 'react'
-import { Form, Input, InputNumber, Switch, Select, Button, Tooltip } from 'antd'
+import React, { useState, useEffect } from 'react'
+import { Form, Input, InputNumber, Switch, Select, Button, Tooltip, Alert } from 'antd'
 import { formItemLayout, tailFormItemLayout } from '../../common/form-layout'
 import HelpIcon from '../common/help-icon'
 
 export default function WidgetForm ({ widget, onSubmit, loading, hasRunningInstance }) {
   const [form] = Form.useForm()
+  const [showDownloadWarning, setShowDownloadWarning] = useState(false)
+
+  useEffect(() => {
+    let timer
+    if (loading) {
+      timer = setTimeout(() => {
+        setShowDownloadWarning(true)
+      }, 3000)
+    } else {
+      setShowDownloadWarning(false)
+    }
+    return () => {
+      if (timer) {
+        clearTimeout(timer)
+      }
+    }
+  }, [loading])
 
   if (!widget) {
     return null
@@ -76,6 +93,20 @@ export default function WidgetForm ({ widget, onSubmit, loading, hasRunningInsta
     )
   }
 
+  function renderWarn () {
+    if (!showDownloadWarning) {
+      return null
+    }
+    return (
+      <Alert
+        title='Downloading package may take some time on first use...'
+        type='warning'
+        showIcon
+        className='mg1t'
+      />
+    )
+  }
+
   const initialValues = configs.reduce((acc, config) => {
     acc[config.name] = config.default
     return acc
@@ -92,6 +123,7 @@ export default function WidgetForm ({ widget, onSubmit, loading, hasRunningInsta
         </h4>
         <p>{info.description}</p>
       </div>
+
       <Form
         form={form}
         onFinish={handleSubmit}
@@ -112,6 +144,7 @@ export default function WidgetForm ({ widget, onSubmit, loading, hasRunningInsta
               {txt}
             </Button>
           </Tooltip>
+          {renderWarn()}
         </Form.Item>
       </Form>
     </div>
