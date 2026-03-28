@@ -98,9 +98,9 @@
   "dependencies": {
     "@electerm/electerm-locales": "2.2.2",
     "@electerm/electerm-themes": "^1.0.1",
-    "@electerm/nedb": "1.8.0",
     "@electerm/ssh2": "1.19.0",
     "@electerm/strip-ansi": "1.0.0",
+    "@seald-io/nedb": "4.1.2",
     "axios": "1.12.2",
     "basic-ftp": "^5.0.5",
     "commander": "12.1.0",
