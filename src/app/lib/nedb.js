@@ -8,7 +8,7 @@ const fs = require('fs')
 const Datastore = require('@seald-io/nedb')
 
 // Tables whose stored data values should be encrypted at rest
-const ENC_TABLES = new Set(['bookmarks', 'profiles', 'data'])
+const ENC_TABLES = new Set(['bookmarks', 'profiles', 'data', 'history', 'terminalCommandHistory', 'aiChatHistory'])
 
 // Within the 'data' table, only this specific record is encrypted
 const DATA_ENC_ID = 'userConfig'
@@ -39,7 +39,10 @@ function createDb (appPath, defaultUserName, { enc, dec } = {}) {
     'log',
     'dbUpgradeLog',
     'profiles',
-    'workspaces'
+    'workspaces',
+    'history',
+    'terminalCommandHistory',
+    'aiChatHistory'
   ]
 
   tables.forEach(table => {
