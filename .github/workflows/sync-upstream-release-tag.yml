@@ -1,0 +1,186 @@
+name: Sync Upstream Release Tag
+
+on:
+  schedule:
+    - cron: '23 3 * * *'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Specific upstream tag to sync, for example v2.16.9
+        required: false
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: sync-upstream-release-tag
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Fetch origin and upstream refs
+        run: |
+          git remote remove upstream 2>/dev/null || true
+          git remote add upstream https://github.com/electerm/electerm.git
+          git fetch origin master --no-tags --force
+          git fetch upstream master --no-tags --force
+          git fetch upstream --no-tags '+refs/tags/*:refs/tags/upstream/*' --force
+
+      - name: Resolve target upstream tag
+        id: target
+        env:
+          REQUESTED_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || '' }}
+        run: |
+          if [ -n "$REQUESTED_TAG" ]; then
+            TARGET_TAG="$REQUESTED_TAG"
+          else
+            TARGET_TAG="$(
+              git for-each-ref refs/tags/upstream --format='%(refname:strip=3)' |
+              rg '^v[0-9]+' |
+              sort -V |
+              tail -n 1
+            )"
+          fi
+
+          if [ -z "$TARGET_TAG" ]; then
+            echo "No upstream release tag found" >&2
+            exit 1
+          fi
+
+          TARGET_REF="refs/tags/upstream/$TARGET_TAG"
+
+          if ! git rev-parse "$TARGET_REF^{commit}" >/dev/null 2>&1; then
+            echo "Unknown upstream tag: $TARGET_TAG" >&2
+            exit 1
+          fi
+
+          TARGET_SHA="$(git rev-list -n 1 "$TARGET_REF")"
+
+          {
+            echo "tag=$TARGET_TAG"
+            echo "ref=$TARGET_REF"
+            echo "sha=$TARGET_SHA"
+          } >> "$GITHUB_OUTPUT"
+
+          {
+            echo "### Sync Target"
+            echo ""
+            echo "- Tag: \`$TARGET_TAG\`"
+            echo "- Commit: \`$TARGET_SHA\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Check whether master already contains the tag
+        id: status
+        run: |
+          if git merge-base --is-ancestor "${{ steps.target.outputs.sha }}" origin/master; then
+            echo "needs_sync=false" >> "$GITHUB_OUTPUT"
+            echo "master already contains ${{ steps.target.outputs.tag }}"
+            {
+              echo ""
+              echo "No sync needed. \`origin/master\` already contains \`${{ steps.target.outputs.tag }}\`."
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "needs_sync=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Prepare sync branch
+        if: steps.status.outputs.needs_sync == 'true'
+        run: git checkout -B auto/sync-upstream-tag origin/master
+
+      - name: Merge upstream tag into sync branch
+        id: merge
+        if: steps.status.outputs.needs_sync == 'true'
+        run: |
+          if git merge --no-ff --no-edit "${{ steps.target.outputs.sha }}"; then
+            echo "clean=true" >> "$GITHUB_OUTPUT"
+            {
+              echo ""
+              echo "Merge completed without conflicts."
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            git merge --abort || true
+            echo "clean=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Stop on merge conflict
+        if: steps.status.outputs.needs_sync == 'true' && steps.merge.outputs.clean != 'true'
+        run: |
+          {
+            echo ""
+            echo "Sync stopped because \`${{ steps.target.outputs.tag }}\` conflicts with \`master\`."
+            echo "No branch or pull request was updated."
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit 1
+
+      - name: Push sync branch
+        if: steps.status.outputs.needs_sync == 'true' && steps.merge.outputs.clean == 'true'
+        run: git push --force-with-lease origin auto/sync-upstream-tag
+
+      - name: Create or update pull request
+        if: steps.status.outputs.needs_sync == 'true' && steps.merge.outputs.clean == 'true'
+        uses: actions/github-script@v7
+        env:
+          TARGET_TAG: ${{ steps.target.outputs.tag }}
+          TARGET_SHA: ${{ steps.target.outputs.sha }}
+        with:
+          script: |
+            const owner = context.repo.owner
+            const repo = context.repo.repo
+            const headBranch = 'auto/sync-upstream-tag'
+            const head = `${owner}:${headBranch}`
+            const base = 'master'
+            const title = `chore: sync upstream ${process.env.TARGET_TAG}`
+            const body = [
+              `Syncs upstream release tag \`${process.env.TARGET_TAG}\` into \`${base}\`.`,
+              '',
+              `- Upstream commit: \`${process.env.TARGET_SHA}\``,
+              `- Triggered by: \`${context.eventName}\``,
+              '',
+              'This pull request was created automatically after a conflict-free merge test.'
+            ].join('\n')
+
+            const { data: pulls } = await github.rest.pulls.list({
+              owner,
+              repo,
+              state: 'open',
+              head,
+              base
+            })
+
+            if (pulls.length > 0) {
+              await github.rest.pulls.update({
+                owner,
+                repo,
+                pull_number: pulls[0].number,
+                title,
+                body
+              })
+              core.info(`Updated PR #${pulls[0].number}`)
+              return
+            }
+
+            const { data: pull } = await github.rest.pulls.create({
+              owner,
+              repo,
+              title,
+              head: headBranch,
+              base,
+              body
+            })
+
+            core.info(`Created PR #${pull.number}`)
