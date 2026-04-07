@@ -313,6 +313,7 @@ class Term extends Component {
   }
 
   timers = {}
+  skipNextContextMenu = false
 
   getDomId = () => {
     return `term-${this.props.tab.id}`
@@ -510,7 +511,46 @@ class Term extends Component {
     }
   }
 
+  consumeMouseEvent = (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    e.nativeEvent?.stopImmediatePropagation?.()
+  }
+
+  isShiftRightClick = (e) => {
+    return e?.button === 2 && e.shiftKey
+  }
+
+  pasteOnShiftRightClick = (e) => {
+    this.skipNextContextMenu = true
+    this.consumeMouseEvent(e)
+    this.onPaste().catch(err => {
+      console.error('Shift+right-click paste failed', err)
+    })
+    clearTimeout(this.timers.shiftRightClickMenuReset)
+    this.timers.shiftRightClickMenuReset = setTimeout(() => {
+      this.skipNextContextMenu = false
+      this.timers.shiftRightClickMenuReset = null
+    }, 250)
+  }
+
+  onMouseDownCapture = e => {
+    if (!this.isShiftRightClick(e)) {
+      return
+    }
+    this.pasteOnShiftRightClick(e)
+  }
+
   onContextMenuInner = e => {
+    if (this.skipNextContextMenu) {
+      this.skipNextContextMenu = false
+      this.consumeMouseEvent(e)
+      return false
+    }
+    if (this.isShiftRightClick(e)) {
+      this.pasteOnShiftRightClick(e)
+      return false
+    }
     e.preventDefault()
     if (this.state.loading) {
       return
@@ -1458,6 +1498,7 @@ class Term extends Component {
         zIndex: 10
       },
       onDrop: this.onDrop,
+      onMouseDownCapture: this.onMouseDownCapture,
       onContextMenu: this.onContextMenuInner
     }
     // const fileProps = {
