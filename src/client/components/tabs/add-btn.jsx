@@ -40,15 +40,18 @@ export default class AddBtn extends Component {
   componentWillUnmount () {
     if (this.state.open) {
       document.removeEventListener('click', this.handleDocumentClick)
+      document.removeEventListener('keydown', this.handleKeyDown)
     }
     // Clean up portal container
     if (this.portalContainer) {
       document.body.removeChild(this.portalContainer)
       this.portalContainer = null
     }
-    // Clear focus timeout
-    if (this.çƒ) {
-      clearTimeout(this.focusTimeout)
+  }
+
+  handleKeyDown = (e) => {
+    if (e.key === 'Escape') {
+      this.setState({ open: false })
     }
   }
 
@@ -56,8 +59,10 @@ export default class AddBtn extends Component {
     // Attach or detach document click listener only when menu open state changes
     if (this.state.open && !prevState.open) {
       document.addEventListener('click', this.handleDocumentClick)
+      document.addEventListener('keydown', this.handleKeyDown)
     } else if (!this.state.open && prevState.open) {
       document.removeEventListener('click', this.handleDocumentClick)
+      document.removeEventListener('keydown', this.handleKeyDown)
     }
   }
 
@@ -115,17 +120,6 @@ export default class AddBtn extends Component {
     )
   }
 
-  focusSearchInput = () => {
-    // Focus the search input after the menu renders
-    this.focusTimeout = setTimeout(() => {
-      const searchInput = this.menuRef.current?.querySelector('.add-menu-list .ant-input')
-      if (searchInput) {
-        searchInput.focus()
-        searchInput.select()
-      }
-    }, 500)
-  }
-
   handleAddBtnClick = () => {
     if (this.state.open) {
       this.setState({ open: false })
@@ -172,7 +166,7 @@ export default class AddBtn extends Component {
           menuPosition,
           menuTop,
           menuLeft
-        }, this.focusSearchInput)
+        })
 
         window.openTabBatch = this.props.batch
       }

@@ -52,7 +52,8 @@ function createDb (appPath, defaultUserName, { enc, dec } = {}) {
     'workspaces',
     'history',
     'terminalCommandHistory',
-    'aiChatHistory'
+    'aiChatHistory',
+    'autoRunWidgets'
   ]
 
   // Create tables in appropriate databases
@@ -98,8 +99,14 @@ function createDb (appPath, defaultUserName, { enc, dec } = {}) {
     if (!row) return null
     const shouldDec = dec && shouldEncForRow(dbName, row._id)
     const raw = shouldDec ? decryptData(row.data) : row.data
+    let r = {}
+    try {
+      r = JSON.parse(raw || '{}')
+    } catch (e) {
+      console.error(`Error parsing JSON for row ${row._id}:`, e.message)
+    }
     return {
-      ...JSON.parse(raw || '{}'),
+      ...r,
       _id: row._id
     }
   }
@@ -144,7 +151,7 @@ function createDb (appPath, defaultUserName, { enc, dec } = {}) {
       const inserted = []
       for (const doc of inserts) {
         const { _id, data } = toRow(doc, dbName)
-        const stmt = db.prepare(`INSERT INTO \`${dbName}\` (_id, data) VALUES (?, ?)`)
+        const stmt = db.prepare(`INSERT OR REPLACE INTO \`${dbName}\` (_id, data) VALUES (?, ?)`)
         stmt.run(_id, data)
         inserted.push({ ...doc, _id })
       }

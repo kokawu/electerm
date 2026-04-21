@@ -1,6 +1,6 @@
 import { PureComponent } from 'react'
 import { CloseOutlined, MinusSquareOutlined, UpCircleOutlined } from '@ant-design/icons'
-import { Button } from 'antd'
+import { Button, Select, Space } from 'antd'
 import { getLatestReleaseInfo, getLatestReleaseVersion } from '../../common/update-check'
 import upgrade from '../../common/upgrade'
 import compare from '../../common/version-compare'
@@ -9,8 +9,7 @@ import {
   isMac,
   isWin,
   packInfo,
-  downloadUpgradeTimeout,
-  mirrors
+  downloadUpgradeTimeout
 } from '../../common/constants'
 import { checkSkipSrc } from '../../common/check-skip-src'
 import { debounce } from 'lodash-es'
@@ -18,6 +17,7 @@ import newTerm from '../../common/new-terminal'
 import Markdown from '../common/markdown'
 import downloadMirrors from '../../common/download-mirrors'
 import { refsStatic } from '../common/ref'
+import message from '../common/message'
 import './upgrade.styl'
 
 const e = window.translate
@@ -25,10 +25,15 @@ const {
   homepage
 } = packInfo
 
+const downloadMirrorList = [
+  'github',
+  'gh-proxy',
+  'sourceforge'
+]
+
 export default class Upgrade extends PureComponent {
   state = {
-    showCount: 0,
-    mirror: mirrors.github
+    mirror: downloadMirrorList[1]
   }
 
   downloadTimer = null
@@ -39,15 +44,23 @@ export default class Upgrade extends PureComponent {
     }
     this.id = 'upgrade'
     refsStatic.add(this.id, this)
+    this.cleanupTimer = setInterval(() => {
+      const { noUpdateMessageExpires } = window.store.upgradeInfo
+      if (noUpdateMessageExpires && Date.now() > noUpdateMessageExpires) {
+        window.store.upgradeInfo.noUpdateMessage = ''
+        window.store.upgradeInfo.noUpdateMessageExpires = 0
+      }
+    }, 1000)
   }
 
-  appUpdateCheck = (noSkip) => {
-    this.setState(old => {
-      return {
-        showCount: old.showCount + 1
-      }
-    })
-    this.getLatestRelease(noSkip)
+  componentWillUnmount () {
+    if (this.cleanupTimer) {
+      clearInterval(this.cleanupTimer)
+    }
+  }
+
+  appUpdateCheck = (isManual) => {
+    this.getLatestRelease(isManual)
   }
 
   changeProps = (update) => {
@@ -65,6 +78,12 @@ export default class Upgrade extends PureComponent {
 
   handleClose = () => {
     window.store.upgradeInfo = {}
+  }
+
+  handleMirrorChange = (mirror) => {
+    this.setState({
+      mirror
+    })
   }
 
   onData = (upgradePercent) => {
@@ -93,17 +112,8 @@ export default class Upgrade extends PureComponent {
   }
 
   timeout = () => {
-    const { mirror } = this.state
     this.cancel()
-    const next = mirror !== mirrors.sourceforge
-      ? this.doUpgrade
-      : undefined
-    const nextMirror = mirror === mirrors['download-electerm']
-      ? mirrors.sourceforge
-      : mirrors['download-electerm']
-    this.setState({
-      mirror: nextMirror
-    }, next)
+    message.error('Download timeout, please try again')
   }
 
   onEnd = () => {
@@ -146,7 +156,7 @@ export default class Upgrade extends PureComponent {
     this.handleClose()
   }
 
-  getLatestRelease = async (noSkipVersion = false) => {
+  getLatestRelease = async (isManual = false) => {
     const { installSrc } = this.props
     if (checkSkipSrc(installSrc)) {
       return
@@ -167,10 +177,19 @@ export default class Upgrade extends PureComponent {
     const { skipVersion = 'v0.0.0' } = this.props
     const currentVer = 'v' + window.et.version.split('-')[0]
     const latestVer = releaseVer.tag_name
-    if (!noSkipVersion && compare(skipVersion, latestVer) >= 0) {
+    if (!isManual && compare(skipVersion, latestVer) >= 0) {
       return
     }
     const shouldUpgrade = compare(currentVer, latestVer) < 0
+    if (!shouldUpgrade) {
+      if (isManual) {
+        this.changeProps({
+          noUpdateMessage: e('noNeed'),
+          noUpdateMessageExpires: Date.now() + 3000
+        })
+      }
+      return
+    }
     const canAutoUpgrade = installSrc || isWin || isMac
     let releaseInfo
     if (canAutoUpgrade) {
@@ -208,28 +227,6 @@ export default class Upgrade extends PureComponent {
     )
   }
 
-  renderCanNotUpgrade = () => {
-    const {
-      showUpgradeModal
-    } = this.props.upgradeInfo
-    const cls = `animate upgrade-panel${showUpgradeModal ? '' : ' upgrade-panel-hide'}`
-    return (
-      <div className={cls}>
-        <div className='upgrade-panel-title fix'>
-          <span className='fleft'>
-            {e('noNeed')}
-          </span>
-          <span className='fright'>
-            <CloseOutlined className='pointer font16 close-upgrade-panel' onClick={this.handleClose} />
-          </span>
-        </div>
-        <div className='upgrade-panel-body'>
-          {e('noNeedDesc')}
-        </div>
-      </div>
-    )
-  }
-
   renderChangeLog = () => {
     const {
       releaseInfo
@@ -261,38 +258,8 @@ export default class Upgrade extends PureComponent {
     )
   }
 
-  render () {
-    const {
-      showCount
-    } = this.state
-    const { installSrc } = this.props
-    const {
-      remoteVersion,
-      upgrading,
-      checkingRemoteVersion,
-      showUpgradeModal,
-      upgradePercent,
-      shouldUpgrade,
-      releaseInfo,
-      error
-    } = this.props.upgradeInfo
-    if (error) {
-      return this.renderError(error)
-    }
-    if (!shouldUpgrade && showCount < 2) {
-      return null
-    }
-    if (!shouldUpgrade && showCount > 1) {
-      return this.renderCanNotUpgrade()
-    }
-    if (checkingRemoteVersion) {
-      return null
-    }
-    const cls = `animate upgrade-panel${showUpgradeModal ? '' : ' upgrade-panel-hide'}`
-    const func = upgrading
-      ? this.cancel
-      : this.doUpgrade
-    const getLink = (
+  renderLinks = () => {
+    return (
       <div>
         <p>
           {e('manuallyDownloadFrom')}:
@@ -307,7 +274,80 @@ export default class Upgrade extends PureComponent {
         {this.renderChangeLog()}
       </div>
     )
+  }
+
+  renderMirrorSelector = () => {
+    return (
+      <Select
+        value={this.state.mirror}
+        onChange={this.handleMirrorChange}
+        getPopupContainer={() => document.body}
+        size='small'
+        style={{ height: 32 }}
+      >
+        {downloadMirrorList.map((opt) => (
+          <Select.Option key={opt} value={opt}>{opt}</Select.Option>
+        ))}
+      </Select>
+    )
+  }
+
+  renderUpgradeButton = () => {
+    const { upgrading, upgradePercent, checkingRemoteVersion } = this.props.upgradeInfo
+    if (upgrading) {
+      const percent = upgradePercent || 0
+      return (
+        <Button
+          type='primary'
+          icon={<UpCircleOutlined />}
+          loading={checkingRemoteVersion}
+          disabled={checkingRemoteVersion}
+          onClick={() => this.cancel()}
+          className='mg1b'
+        >
+          <span>{`${e('upgrading')}... ${percent}% ${e('cancel')}`}</span>
+        </Button>
+      )
+    }
+    return (
+      <Space.Compact>
+        {this.renderMirrorSelector()}
+        <Button
+          type='primary'
+          icon={<UpCircleOutlined />}
+          loading={checkingRemoteVersion}
+          disabled={checkingRemoteVersion}
+          onClick={() => this.doUpgrade()}
+          className='mg1b'
+        >
+          {e('upgrade')}
+        </Button>
+      </Space.Compact>
+    )
+  }
+
+  renderUpgradeContent = () => {
+    const { installSrc } = this.props
     const skip = checkSkipSrc(installSrc)
+    if (skip) {
+      return this.renderLinks()
+    }
+    return (
+      <div>
+        {this.renderUpgradeButton()}
+        {this.renderSkipVersion()}
+        <div className='pd1t'>
+          {this.renderLinks()}
+        </div>
+      </div>
+    )
+  }
+
+  renderUpgradePanel = () => {
+    const { remoteVersion, releaseInfo, showUpgradeModal } = this.props.upgradeInfo
+    const cls = showUpgradeModal
+      ? 'animate upgrade-panel'
+      : 'animate upgrade-panel upgrade-panel-hide'
     return (
       <div className={cls}>
         <div className='upgrade-panel-title fix'>
@@ -319,34 +359,23 @@ export default class Upgrade extends PureComponent {
           </span>
         </div>
         <div className='upgrade-panel-body'>
-          {
-            !skip
-              ? (
-                <div>
-                  <Button
-                    type='primary'
-                    icon={<UpCircleOutlined />}
-                    loading={checkingRemoteVersion}
-                    disabled={checkingRemoteVersion}
-                    onClick={func}
-                    className='mg1b'
-                  >
-                    {
-                      upgrading
-                        ? <span>{`${e('upgrading')}... ${upgradePercent || 0}% ${e('cancel')}`}</span>
-                        : e('upgrade')
-                    }
-                  </Button>
-                  {this.renderSkipVersion()}
-                  <div className='pd1t'>
-                    {getLink}
-                  </div>
-                </div>
-                )
-              : getLink
-          }
+          {this.renderUpgradeContent()}
         </div>
       </div>
     )
+  }
+
+  render () {
+    const { shouldUpgrade, checkingRemoteVersion, error } = this.props.upgradeInfo
+    if (error) {
+      return this.renderError(error)
+    }
+    if (!shouldUpgrade) {
+      return null
+    }
+    if (checkingRemoteVersion) {
+      return null
+    }
+    return this.renderUpgradePanel()
   }
 }

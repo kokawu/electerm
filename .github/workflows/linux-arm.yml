@@ -76,10 +76,12 @@ jobs:
         const fs = require('fs');
         const pkg = JSON.parse(fs.readFileSync('package.json'));
         pkg.devDependencies.electron = '22.3.27';
+        pkg.devDependencies['electron-builder'] = '26.0.20';
         pkg.devDependencies['@electron/rebuild'] = '3.7.2';
         pkg.dependencies['node-pty'] = '1.1.0-beta14';
         pkg.dependencies.serialport = '13.0.0';
         pkg.devDependencies.vite = '4';
+        pkg.devDependencies['@vitejs/plugin-react'] = '4.7.0';
         fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2));
         "
         rm -f package-lock.json

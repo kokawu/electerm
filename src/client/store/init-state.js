@@ -156,7 +156,7 @@ export default () => {
     qmSortByFrequency: ls.getItem(qmSortByFrequencyKey) === 'yes',
 
     // sidebar
-    openedSideBar: ls.getItem(openedSidebarKey),
+    openedSideBar: ls.getItem(openedSidebarKey) || '',
     leftSidebarWidth: parseInt(ls.getItem(leftSidebarWidthKey), 10) || 300,
     addPanelWidth: parseInt(ls.getItem(addPanelWidthLsKey), 10) || 300,
     menuOpened: false,
@@ -201,6 +201,7 @@ export default () => {
     // widgets
     widgets: [],
     widgetInstances: [],
+    autoRunWidgets: [],
     // move item
     openMoveModal: false,
     moveItem: null,

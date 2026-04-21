@@ -90,9 +90,6 @@ Check [https://electerm-repos.html5beta.com/deb](https://electerm-repos.html5bet
 ```bash
 npm i -g electerm
 
-# After installation, it will immediately open for windows and linux,
-# For macOS, it will open the drag to install panel
-
 ```
 
 ## Upgrade
@@ -141,7 +138,7 @@ wechat donate
 ```bash
 # May only works in Linux
 # needs nodejs/npm, suggest using nvm to install nodejs/npm
-# with nodejs 22.x
+# with nodejs 24.x
 
 git clone git@github.com:electerm/electerm.git
 cd electerm

@@ -89,10 +89,6 @@ scoop install dorado/electerm
 
 ```bash
 npm i -g electerm
-
-# after installation, it will immediately open for windows and linux,
-# for macOS, it will open the drag to install panel
-
 ```
 
 ## 升级
@@ -141,7 +137,7 @@ kofi
 ```bash
 # May only works in Linux
 # needs nodejs/npm, suggest using fnm to install nodejs/npm
-# with nodejs 22.x
+# with nodejs 24.x
 
 git clone git@github.com:electerm/electerm.git
 cd electerm
