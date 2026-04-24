@@ -80,8 +80,18 @@ export default function AIBookmarkForm (props) {
 
       let bookmarkData
       if (aiResponse && aiResponse.response) {
+        // Normalize response payload to string before JSON extraction.
+        const rawResponse = aiResponse.response
+        let jsonStr = ''
+        if (typeof rawResponse === 'string') {
+          jsonStr = rawResponse
+        } else if (typeof rawResponse === 'object') {
+          jsonStr = JSON.stringify(rawResponse)
+        } else {
+          jsonStr = String(rawResponse)
+        }
         // Parse the JSON response
-        let jsonStr = aiResponse.response.trim()
+        jsonStr = jsonStr.trim()
         // Remove markdown code blocks if present
         if (jsonStr.startsWith('```json')) {
           jsonStr = jsonStr.slice(7)
@@ -93,7 +103,7 @@ export default function AIBookmarkForm (props) {
         }
         jsonStr = jsonStr.trim()
 
-        bookmarkData = JSON.parse(jsonStr)
+        bookmarkData = getGeneratedData(jsonStr)
         const pretty = JSON.stringify(bookmarkData, null, 2)
         setEditorText(pretty)
         // set default category when preview opens
@@ -109,16 +119,17 @@ export default function AIBookmarkForm (props) {
     }
   }
 
-  function getGeneratedData () {
-    if (!editorText) return []
+  function getGeneratedData (txt = editorText) {
+    if (!txt) return []
     let parsed = null
     try {
-      parsed = fixBookmarkData(JSON.parse(editorText))
+      parsed = JSON.parse(txt)
     } catch (err) {
       return []
     }
     if (!parsed) return []
-    return Array.isArray(parsed) ? parsed : [parsed]
+    const arr = Array.isArray(parsed) ? parsed : [parsed]
+    return arr.map(d => fixBookmarkData(d))
   }
 
   const createBookmark = async (bm) => {
@@ -228,6 +239,7 @@ export default function AIBookmarkForm (props) {
     }
     return (
       <SimpleEditor
+        key='editor'
         {...editorProps}
       />
     )
@@ -238,7 +250,7 @@ export default function AIBookmarkForm (props) {
       return renderEditor()
     }
     return (
-      <pre className='ai-bookmark-json-preview'>
+      <pre key='preview' className='ai-bookmark-json-preview'>
         {editorText}
       </pre>
     )
