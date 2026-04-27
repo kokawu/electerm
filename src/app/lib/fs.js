@@ -5,12 +5,15 @@ const path = require('path')
 const { isWin, isMac, tempDir } = require('../common/runtime-constants')
 const uid = require('../common/uid')
 const { promisify } = require('util')
-const execAsync = promisify(
-  require('child_process').exec
-)
+const { exec, spawn } = require('child_process')
+const execAsync = promisify(exec)
 const { getSizeCount, getSizeCountWin } = require('../common/get-folder-size-and-file-count.js')
 
 const ROOT_PATH = '/'
+
+function encodeUtf8Base64 (value) {
+  return Buffer.from(String(value), 'utf8').toString('base64')
+}
 
 // Encoding function
 function encodeUint8Array (uint8Arr) {
@@ -47,6 +50,47 @@ const run = (cmd) => {
  */
 const runWinCmd = (cmd) => {
   return execAsync(`powershell.exe -Command "${cmd}"`)
+}
+
+function spawnDetachedCommand (command, args, options = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      detached: false,
+      stdio: ['ignore', 'ignore', 'pipe'],
+      ...options
+    })
+    let stderr = ''
+
+    child.stderr.on('data', data => {
+      stderr += data.toString()
+    })
+    child.on('error', reject)
+
+    let settled = false
+    const settle = (err) => {
+      if (settled) {
+        return
+      }
+      settled = true
+      clearTimeout(timer)
+      child.unref()
+      if (err) {
+        reject(err)
+      } else {
+        resolve()
+      }
+    }
+
+    child.on('close', code => {
+      if (code !== 0) {
+        settle(new Error(stderr.trim() || `Command exited with code ${code}`))
+      } else {
+        settle(null)
+      }
+    })
+
+    const timer = setTimeout(() => settle(null), 5000)
+  })
 }
 
 function getFolderSizeWin (folderPath) {
@@ -109,16 +153,22 @@ const touch = (localFilePath) => {
  * @param {string} localFolderPath absolute path
  */
 const openFile = (localFilePath) => {
-  let cmd
   if (isWin) {
-    cmd = `Invoke-Item '${localFilePath}'`
-    return runWinCmd(cmd)
+    const script = '$path = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($env:ELECTERM_OPEN_FILE_PATH_B64)); Invoke-Item -LiteralPath $path'
+    return spawnDetachedCommand('powershell.exe', [
+      '-NoLogo',
+      '-NonInteractive',
+      '-Command',
+      script
+    ], {
+      windowsHide: true,
+      env: {
+        ...process.env,
+        ELECTERM_OPEN_FILE_PATH_B64: encodeUtf8Base64(localFilePath)
+      }
+    })
   }
-  cmd = (isMac
-    ? 'open'
-    : 'xdg-open') +
-    ` "${localFilePath}"`
-  return run(cmd)
+  return spawnDetachedCommand(isMac ? 'open' : 'xdg-open', [localFilePath])
 }
 
 /**
