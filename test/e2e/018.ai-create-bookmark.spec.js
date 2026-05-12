@@ -55,7 +55,7 @@ describe('AI Create Bookmark', function () {
     await delay(1000)
 
     log('verify AI config form is shown')
-    await client.hasElem('.setting-wrap .ai-config-form')
+    await client.hasElem('.ai-config-modal .ai-config-form')
 
     log('fill AI configuration form')
     await client.setValue('#baseURLAI', 'http://localhost:43434')
@@ -69,9 +69,9 @@ describe('AI Create Bookmark', function () {
     await client.click('.ai-config-form button[type="submit"]')
     await delay(1000)
 
-    log('close setting panel')
-    await client.click('.close-setting-wrap-icon')
-    await delay(1000)
+    // log('close setting panel')
+    // await client.click('.custom-modal-close')
+    // await delay(1000)
 
     log('open bookmarks page again')
     await client.click('.btns .anticon-plus-circle')

@@ -4,13 +4,7 @@
 
 import React from 'react'
 import { Component } from 'manate/react/class-components'
-import {
-  CheckOutlined,
-  CloseOutlined,
-  LoadingOutlined
-} from '@ant-design/icons'
-import createName from '../../common/create-title'
-import InputAutoFocus from '../common/input-auto-focus'
+import { LoadingOutlined } from '@ant-design/icons'
 import { uniq, filter, pick } from 'lodash-es'
 import {
   maxBookmarkGroupTitleLength,
@@ -25,11 +19,17 @@ import getInitItem from '../../common/init-setting-item'
 import uid from '../../common/uid'
 import { action } from 'manate'
 import './tree-list.styl'
-import TreeExpander from './tree-expander'
-import TreeListItem from './tree-list-item'
+import TreeListRow from './tree-list-row'
+import TreeListEditorOverlay from './tree-list-editor-overlay.jsx'
 import TreeSearch from './tree-search'
-import { CategoryColorPicker } from './category-color-picker.jsx'
+import VirtualTreeList from './virtual-tree-list'
+import { buildVisibleTreeRows } from './tree-list-rows'
 import { getRandomDefaultColor } from '../../common/rand-hex-color.js'
+import {
+  treeEditorRowHeight,
+  treeLevelIndent,
+  treeRowHeight
+} from './tree-list-layout'
 
 export default class ItemListTree extends Component {
   constructor (props) {
@@ -43,9 +43,10 @@ export default class ItemListTree extends Component {
       bookmarkGroupColor: '',
       categoryTitle: '',
       categoryColor: '',
-      categoryId: ''
+      categoryId: '',
+      searchSelectedRowKey: ''
     }
-    this.treeRef = React.createRef()
+    this.listRef = React.createRef()
   }
 
   onSubmit = false
@@ -64,21 +65,19 @@ export default class ItemListTree extends Component {
     clearTimeout(this.timer)
   }
 
+  scrollTreeToTop = () => {
+    const listWrap = this.listRef.current
+    if (listWrap) {
+      listWrap.scrollTop = 0
+    }
+  }
+
   onCancelMoveItem = () => {
     this.setState({
       openMoveModal: false,
       moveItem: null,
       moveItemIsGroup: false
     })
-  }
-
-  filter = (list) => {
-    const { keyword } = this.state
-    return keyword
-      ? list.filter(item => {
-        return createName(item).toLowerCase().includes(keyword.toLowerCase())
-      })
-      : list
   }
 
   onExpandKey = group => {
@@ -104,55 +103,86 @@ export default class ItemListTree extends Component {
   }
 
   handleChange = keyword => {
-    this.setState({ keyword })
+    this.setState({
+      keyword,
+      searchSelectedRowKey: ''
+    })
   }
 
   handleKeyDown = (e) => {
     const { keyword } = this.state
     if (!keyword) return
+    this.handleVirtualTreeKeyDown(e)
+  }
 
-    const treeContainer = this.treeRef.current
-    if (!treeContainer) return
-
-    const allItems = treeContainer.querySelectorAll('.tree-item')
-    const matchedItems = Array.from(allItems).filter(item => {
-      const isGroup = item.getAttribute('data-is-group') === 'true'
-      if (isGroup) return false
-      const title = item.querySelector('.tree-item-title')
-      if (!title) return false
-      const text = title.textContent || ''
-      return text.toLowerCase().includes(keyword.toLowerCase())
-    })
-
-    if (matchedItems.length === 0) return
-
-    const currentSelected = treeContainer.querySelector('.tree-item.search-selected')
-    let currentIndex = -1
-    if (currentSelected) {
-      currentSelected.classList.remove('search-selected')
-      currentIndex = matchedItems.indexOf(currentSelected)
+  handleVirtualTreeKeyDown = (e) => {
+    const { matchedRowKeys, rows } = this.getVisibleTreeData()
+    if (!matchedRowKeys.length) {
+      return
     }
+
+    const { searchSelectedRowKey } = this.state
+    const currentIndex = matchedRowKeys.indexOf(searchSelectedRowKey)
 
     if (e.key === 'ArrowDown') {
       e.preventDefault()
-      const nextIndex = (currentIndex + 1) % matchedItems.length
-      matchedItems[nextIndex].classList.add('search-selected')
-      matchedItems[nextIndex].scrollIntoView({ block: 'nearest' })
-    } else if (e.key === 'ArrowUp') {
+      const nextIndex = (currentIndex + 1) % matchedRowKeys.length
+      const rowKey = matchedRowKeys[nextIndex]
+      this.setState({ searchSelectedRowKey: rowKey })
+      this.scrollRowIntoView(rows, rowKey)
+      return
+    }
+
+    if (e.key === 'ArrowUp') {
       e.preventDefault()
-      const nextIndex = currentIndex <= 0 ? matchedItems.length - 1 : currentIndex - 1
-      matchedItems[nextIndex].classList.add('search-selected')
-      matchedItems[nextIndex].scrollIntoView({ block: 'nearest' })
-    } else if (e.key === 'Enter') {
+      const nextIndex = currentIndex <= 0 ? matchedRowKeys.length - 1 : currentIndex - 1
+      const rowKey = matchedRowKeys[nextIndex]
+      this.setState({ searchSelectedRowKey: rowKey })
+      this.scrollRowIntoView(rows, rowKey)
+      return
+    }
+
+    if (e.key === 'Enter') {
       e.preventDefault()
-      const target = currentIndex >= 0 ? matchedItems[currentIndex] : matchedItems[0]
-      if (target) {
-        const titleEl = target.querySelector('.tree-item-title')
-        if (titleEl) {
-          titleEl.click()
-        }
+      const rowKey = currentIndex >= 0
+        ? matchedRowKeys[currentIndex]
+        : matchedRowKeys[0]
+      const row = rows.find(item => item.key === rowKey)
+      if (row?.item?.id) {
+        this.selectBookmarkById(row.item.id)
       }
     }
+  }
+
+  scrollRowIntoView = (rows, rowKey) => {
+    const listWrap = this.listRef.current
+    if (!listWrap) {
+      return
+    }
+    const rowIndex = rows.findIndex(row => row.key === rowKey)
+    if (rowIndex < 0) {
+      return
+    }
+    const rowTop = rowIndex * treeRowHeight
+    const rowBottom = rowTop + treeRowHeight
+    const viewportTop = listWrap.scrollTop
+    const viewportBottom = viewportTop + listWrap.clientHeight
+
+    if (rowTop < viewportTop) {
+      listWrap.scrollTop = rowTop
+    } else if (rowBottom > viewportBottom) {
+      listWrap.scrollTop = rowBottom - listWrap.clientHeight
+    }
+  }
+
+  getVisibleTreeData = () => {
+    return buildVisibleTreeRows({
+      bookmarkGroups: this.props.bookmarkGroups,
+      bookmarkGroupTree: this.props.bookmarkGroupTree,
+      bookmarksMap: this.props.bookmarksMap,
+      expandedKeys: this.props.expandedKeys,
+      keyword: this.state.keyword
+    })
   }
 
   handleCancelNew = () => {
@@ -319,7 +349,7 @@ export default class ItemListTree extends Component {
       bookmarkGroupTitle: '',
       bookmarkGroupColor: getRandomDefaultColor(),
       parentId: ''
-    })
+    }, this.scrollTreeToTop)
   }
 
   del = (item, e) => {
@@ -358,16 +388,21 @@ export default class ItemListTree extends Component {
         : this.onExpandKey
       func({ id })
     } else {
-      store.storeAssign({
-        currentBookmarkGroupId: findBookmarkGroupId(store.bookmarkGroups, id)
-      })
-      const { bookmarks } = this.props
-      const bookmark = bookmarks.find(
-        d => d.id === id
-      )
-      if (bookmark) {
-        this.props.onClickItem(bookmark)
-      }
+      this.selectBookmarkById(id)
+    }
+  }
+
+  selectBookmarkById = (id) => {
+    const { store } = window
+    store.storeAssign({
+      currentBookmarkGroupId: findBookmarkGroupId(store.bookmarkGroups, id)
+    })
+    const { bookmarks } = this.props
+    const bookmark = bookmarks.find(
+      d => d.id === id
+    )
+    if (bookmark) {
+      this.props.onClickItem(bookmark)
     }
   }
 
@@ -610,34 +645,6 @@ export default class ItemListTree extends Component {
     }
   })
 
-  editCategory = () => {
-    const {
-      categoryTitle,
-      categoryColor
-    } = this.state
-    const confirm = (
-      <span>
-        <CheckOutlined className='pointer' onClick={this.handleSubmitEdit} />
-        <CloseOutlined className='mg1l pointer' onClick={this.handleCancelEdit} />
-      </span>
-    )
-    const colorPicker = (
-      <CategoryColorPicker
-        value={categoryColor || getRandomDefaultColor()}
-        onChange={this.handleChangeCategoryColor}
-      />
-    )
-    return (
-      <InputAutoFocus
-        value={categoryTitle}
-        onChange={this.handleChangeEdit}
-        onPressEnter={this.handleSubmitEdit}
-        prefix={colorPicker}
-        suffix={confirm}
-      />
-    )
-  }
-
   duplicateItem = (e, item) => {
     e.stopPropagation()
     const { addItem } = window.store
@@ -701,46 +708,127 @@ export default class ItemListTree extends Component {
     })
   }
 
-  renderItemTitle = (item, isGroup, parentId) => {
-    if (isGroup && item.id === this.state.categoryId) {
-      return this.editCategory(item)
-    }
-    const itemProps = {
-      item,
-      isGroup,
-      parentId,
-      leftSidebarWidth: this.props.leftSidebarWidth,
-      staticList: this.props.staticList,
-      selectedItemId: this.props.activeItemId,
-      ...pick(
-        this,
-        [
-          'del',
-          'openAll',
-          'openMoveModal',
-          'editItem',
-          'addSubCat',
-          'onSelect',
-          'duplicateItem',
-          'onDragStart',
-          'onDrop',
-          'onDragEnter',
-          'onDragLeave',
-          'onDragOver'
-        ]
-      ),
-      ...pick(
-        this.state,
-        [
-          'keyword'
-        ]
-      )
-    }
+  renderVirtualRow = (row, editor) => {
     return (
-      <TreeListItem
-        {...itemProps}
+      <TreeListRow
+        row={row}
+        keyword={this.state.keyword}
+        expandedKeys={this.props.expandedKeys}
+        activeItemId={this.props.activeItemId}
+        searchSelectedRowKey={this.state.searchSelectedRowKey}
+        staticList={this.props.staticList}
+        leftSidebarWidth={this.props.leftSidebarWidth}
+        {...pick(
+          this,
+          [
+            'del',
+            'openAll',
+            'openMoveModal',
+            'editItem',
+            'addSubCat',
+            'onSelect',
+            'duplicateItem',
+            'onDragStart',
+            'onDrop',
+            'onDragEnter',
+            'onDragLeave',
+            'onDragOver'
+          ]
+        )}
+        handleExpand={this.onExpandKey}
+        handleUnExpand={this.onUnExpandKey}
+        isHidden={editor?.hideRowKey === row.key}
       />
     )
+  }
+
+  getEditorOverlayState = (rows) => {
+    const {
+      categoryColor,
+      categoryId,
+      categoryTitle,
+      bookmarkGroupColor,
+      bookmarkGroupTitle,
+      parentId,
+      showNewBookmarkGroupForm
+    } = this.state
+
+    if (categoryId) {
+      const rowIndex = rows.findIndex(row => row.isGroup && row.item.id === categoryId)
+      if (rowIndex < 0) {
+        return null
+      }
+      const row = rows[rowIndex]
+      return {
+        top: rowIndex * treeRowHeight,
+        left: Math.max(0, (row.depth - 1) * treeLevelIndent),
+        title: categoryTitle,
+        color: categoryColor,
+        handleTitleChange: this.handleChangeEdit,
+        handleColorChange: this.handleChangeCategoryColor,
+        handleSubmit: this.handleSubmitEdit,
+        handleCancel: this.handleCancelEdit,
+        selectall: true,
+        hideRowKey: row.key
+      }
+    }
+
+    if (!showNewBookmarkGroupForm) {
+      return null
+    }
+
+    if (!parentId) {
+      return {
+        top: 0,
+        left: 0,
+        title: bookmarkGroupTitle,
+        color: bookmarkGroupColor,
+        handleTitleChange: this.handleChangeBookmarkGroupTitle,
+        handleColorChange: this.handleChangeBookmarkGroupColor,
+        handleSubmit: this.handleSubmit,
+        handleCancel: this.handleCancelNew,
+        insertionGap: {
+          index: 0,
+          height: treeEditorRowHeight
+        }
+      }
+    }
+
+    const parentIndex = rows.findIndex(row => row.isGroup && row.item.id === parentId)
+    if (parentIndex < 0) {
+      return null
+    }
+    const parentRow = rows[parentIndex]
+    return {
+      top: (parentIndex + 1) * treeRowHeight,
+      left: parentRow.depth * treeLevelIndent,
+      title: bookmarkGroupTitle,
+      color: bookmarkGroupColor,
+      handleTitleChange: this.handleChangeBookmarkGroupTitle,
+      handleColorChange: this.handleChangeBookmarkGroupColor,
+      handleSubmit: this.handleSubmit,
+      handleCancel: this.handleCancelNew,
+      insertionGap: {
+        index: parentIndex + 1,
+        height: treeEditorRowHeight
+      }
+    }
+  }
+
+  renderVirtualTreeContent = (rows, editor) => {
+    return (
+      <VirtualTreeList
+        items={rows}
+        rowHeight={treeRowHeight}
+        containerRef={this.listRef}
+        insertionGap={editor?.insertionGap}
+        renderItem={row => this.renderVirtualRow(row, editor)}
+      />
+    )
+  }
+
+  renderEditorOverlay = (editor) => {
+    return <TreeListEditorOverlay editor={editor} />
   }
 
   handleExport = () => {
@@ -764,161 +852,6 @@ export default class ItemListTree extends Component {
     )
   }
 
-  renderGroup = (group, index, parentId) => {
-    const pids = typeof parentId === 'string' ? parentId : ''
-    const pid = pids + '#' + group.id
-    const { bookmarkIds = [], bookmarkGroupIds = [] } = group
-
-    const hasMatchedItems = (ids) => {
-      const tree = this.props.bookmarksMap
-      const { keyword } = this.state
-      return ids.some(id => {
-        const item = tree.get(id)
-        return item && createName(item).toLowerCase().includes(keyword.toLowerCase())
-      })
-    }
-
-    const hasMatchedSubGroup = (bg) => {
-      const bgIds = bg.bookmarkIds || []
-      const bgSubIds = bg.bookmarkGroupIds || []
-      if (hasMatchedItems(bgIds)) return true
-      return bgSubIds.some(sgid => {
-        const subBg = window.store.bookmarkGroupTree[sgid]
-        return subBg && hasMatchedSubGroup(subBg)
-      })
-    }
-
-    if (this.state.keyword) {
-      if (!hasMatchedItems(bookmarkIds) && !bookmarkGroupIds.some(id => {
-        const sg = window.store.bookmarkGroupTree[id]
-        return sg && hasMatchedSubGroup(sg)
-      })) {
-        return null
-      }
-    }
-    return (
-      <div key={group.id} className='group-container'>
-        {
-          this.renderExpander(group, pid)
-        }
-        {
-          this.renderGroupTitle(group, pids)
-        }
-        <div className='group-container-sub'>
-          {
-            this.renderNewCat(group, pid)
-          }
-          {
-            this.renderGroupChildren(group, pid)
-          }
-        </div>
-      </div>
-    )
-  }
-
-  renderNewCat = (group) => {
-    const {
-      bookmarkGroupTitle,
-      bookmarkGroupColor,
-      parentId,
-      showNewBookmarkGroupForm
-    } = this.state
-    if (!showNewBookmarkGroupForm || group.id !== parentId) {
-      return null
-    }
-    const confirm = (
-      <span>
-        <CheckOutlined className='pointer' onClick={this.handleSubmit} />
-        <CloseOutlined className='mg1l pointer' onClick={this.handleCancelNew} />
-      </span>
-    )
-    const colorPicker = (
-      <CategoryColorPicker
-        value={bookmarkGroupColor || getRandomDefaultColor()}
-        onChange={this.handleChangeBookmarkGroupColor}
-      />
-    )
-    return (
-      <div className='pd1y'>
-        <InputAutoFocus
-          value={bookmarkGroupTitle}
-          onPressEnter={this.handleSubmit}
-          onChange={this.handleChangeBookmarkGroupTitle}
-          prefix={colorPicker}
-          suffix={confirm}
-          onBlur={this.handleBlurBookmarkGroupTitle}
-        />
-      </div>
-    )
-  }
-
-  renderExpander = (group, level) => {
-    const expProps = {
-      level,
-      group,
-      keyword: this.state.keyword,
-      expandedKeys: this.props.expandedKeys,
-      onExpand: this.onExpandKey,
-      onUnExpand: this.onUnExpandKey
-    }
-    return (
-      <TreeExpander
-        {...expProps}
-      />
-    )
-  }
-
-  renderGroupTitle = (group, parentId) => {
-    return this.renderItemTitle(group, true, parentId)
-  }
-
-  renderGroupChildren = (group, parentId) => {
-    const {
-      bookmarkIds = [],
-      bookmarkGroupIds = [],
-      id
-    } = group
-    const shouldRender = this.state.keyword || this.props.expandedKeys.includes(id)
-    if (!shouldRender) {
-      return null
-    }
-    const subGroups = this.renderSubGroup(bookmarkGroupIds, parentId)
-    const childs = this.renderChilds(bookmarkIds, parentId)
-    if (this.state.keyword && subGroups.length === 0 && childs.length === 0) {
-      return null
-    }
-    return [
-      ...subGroups,
-      ...childs
-    ]
-  }
-
-  renderSubGroup = (bookmarkGroupIds, parentId) => {
-    const bookmarkGroups = bookmarkGroupIds.map(id => {
-      return window.store.bookmarkGroupTree[id]
-    }).filter(d => d)
-    return bookmarkGroups.map((node, i) => {
-      return this.renderGroup(node, i, parentId)
-    })
-  }
-
-  renderChilds = (bookmarkIds, pid) => {
-    const tree = this.props.bookmarksMap
-    const { keyword } = this.state
-    const bookmarks = bookmarkIds.map(id => {
-      const item = tree.get(id)
-      if (!item) {
-        return null
-      }
-      return createName(item).toLowerCase().includes(keyword.toLowerCase())
-        ? item
-        : null
-    }).filter(d => d)
-    return bookmarks.map((node) => {
-      return this.renderItemTitle(node, false, pid)
-    })
-  }
-
   render () {
     const { ready } = this.state
     if (!ready) {
@@ -929,39 +862,14 @@ export default class ItemListTree extends Component {
       )
     }
     const {
-      bookmarkGroups,
       type,
       staticList,
       listStyle = {}
     } = this.props
-    const level1Bookgroups = ready
-      ? bookmarkGroups.filter(d => {
-        if (!d.level || d.level < 2) {
-          if (this.state.keyword) {
-            const hasMatchedItemsRecursive = (bg) => {
-              const ids = bg.bookmarkIds || []
-              const subIds = bg.bookmarkGroupIds || []
-              const tree = this.props.bookmarksMap
-              const { keyword } = this.state
-              const hasMatch = ids.some(id => {
-                const item = tree.get(id)
-                return item && createName(item).toLowerCase().includes(keyword.toLowerCase())
-              })
-              if (hasMatch) return true
-              return subIds.some(sgid => {
-                const subBg = window.store.bookmarkGroupTree[sgid]
-                return subBg && hasMatchedItemsRecursive(subBg)
-              })
-            }
-            return hasMatchedItemsRecursive(d)
-          }
-          return true
-        }
-        return false
-      })
-      : []
+    const { rows } = this.getVisibleTreeData()
+    const editor = this.getEditorOverlayState(rows)
     return (
-      <div className={`tree-list item-type-${type}`} ref={this.treeRef}>
+      <div className={`tree-list item-type-${type}`}>
         <div className='tree-list-header'>
           {
             staticList
@@ -972,9 +880,13 @@ export default class ItemListTree extends Component {
             this.renderSearch()
           }
         </div>
-        <div className='item-list-wrap' style={listStyle}>
-          {this.renderNewCat({ id: '' })}
-          {level1Bookgroups.map(this.renderGroup)}
+        <div
+          className='item-list-wrap'
+          style={listStyle}
+          ref={this.listRef}
+        >
+          {this.renderVirtualTreeContent(rows, editor)}
+          {this.renderEditorOverlay(editor)}
         </div>
       </div>
     )

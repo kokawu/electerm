@@ -53,7 +53,7 @@ describe('AI Config and Suggestions', function () {
     await delay(1000)
 
     // Verify AI setting page is open
-    await expect(client.locator('.setting-wrap .ai-config-form')).toBeVisible()
+    await expect(client.locator('.ai-config-modal .ai-config-form')).toBeVisible()
 
     // Fill in the AI configuration form
     await client.fill('#baseURLAI', 'http://localhost:43434')
@@ -65,10 +65,6 @@ describe('AI Config and Suggestions', function () {
 
     // Save the configuration
     await client.click('.ai-config-form button[type="submit"]')
-    await delay(1000)
-
-    // Close the setting panel
-    await client.click('.close-setting-wrap-icon')
     await delay(1000)
 
     // Verify the setting panel is closed
@@ -86,7 +82,7 @@ describe('AI Config and Suggestions', function () {
     await delay(1000)
 
     // Verify that the AI setting page does not open this time
-    await expect(client.locator('.setting-wrap .ai-config-form')).not.toBeVisible()
+    await expect(client.locator('.ai-config-modal .ai-config-form')).not.toBeVisible()
 
     // Verify that AI functionality is triggered instead
     await expect(client.locator('.ai-chat-container')).toBeVisible()

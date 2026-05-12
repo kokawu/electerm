@@ -1,5 +1,4 @@
 import { Component, createRef } from 'react'
-import { handleErr } from '../../common/fetch.jsx'
 import { isEqual, pick, debounce, throttle } from 'lodash-es'
 import clone from '../../common/to-simple-obj.js'
 import resolve from '../../common/resolve.js'
@@ -7,7 +6,6 @@ import {
   Spin,
   Dropdown
 } from 'antd'
-import { notification } from '../common/notification'
 import message from '../common/message'
 import Modal from '../common/modal'
 import classnames from 'classnames'
@@ -48,8 +46,8 @@ import ExternalLink from '../common/external-link.jsx'
 import createDefaultLogPath from '../../common/default-log-path.js'
 import SearchResultBar from './terminal-search-bar'
 import RemoteFloatControl from '../common/remote-float-control'
-import { showSocketCloseWarning } from './socket-close-warning.jsx'
 import ReconnectOverlay from './reconnect-overlay.jsx'
+import TerminalErrorHandle from './terminal-error-handle.jsx'
 import {
   loadTerminal,
   loadFitAddon,
@@ -78,6 +76,7 @@ class Term extends Component {
       matchIndex: -1,
       totalLines: 0,
       reconnectCountdown: null,
+      terminalError: null,
       dropFileModalVisible: false,
       droppedFiles: []
     }
@@ -176,11 +175,6 @@ class Term extends Component {
     this.cmdAddon = null
     this.imageAddon = null
     this.osc52Decoder = null
-    // Clear the notification if it exists
-    if (this.socketCloseWarning) {
-      notification.destroy(this.socketCloseWarning.key)
-      this.socketCloseWarning = null
-    }
   }
 
   handleOsc52 = (data) => {
@@ -1045,13 +1039,15 @@ class Term extends Component {
 
     term.onSelectionChange(this.onSelectionChange)
     term.attachCustomKeyEventHandler(this.handleKeyboardEvent.bind(this))
+    this.fitAddon.fit()
     await this.remoteInit(term)
   }
 
   onSelectionChange = () => {
-    this.setState({
-      hasSelection: this.term.hasSelection()
-    })
+    const hasSelection = this.term.hasSelection()
+    const txt = hasSelection ? this.term.getSelection().trim() : ''
+    this.setState({ hasSelection })
+    refsStatic.get('unix-timestamp-tooltip')?.onSelection(txt)
   }
 
   // setActive = () => {
@@ -1261,7 +1257,8 @@ class Term extends Component {
 
   remoteInit = async (term = this.term) => {
     this.setState({
-      loading: true
+      loading: true,
+      terminalError: null
     })
     const { cols, rows } = term
     const { config } = this.props
@@ -1339,7 +1336,7 @@ class Term extends Component {
       .catch(err => {
         if (!isAutoReconnect) {
           const text = err.message
-          handleErr({ message: text })
+          this.handleError({ message: text, from, srcId })
         }
       })
     if (typeof r === 'string' && r.includes('fail')) {
@@ -1393,6 +1390,29 @@ class Term extends Component {
     term.loadAddon(
       new KeywordHighlighterAddon(keywords)
     )
+  }
+
+  handleError = ({ message: errorMessage, from, srcId }) => {
+    this.setState({
+      terminalError: {
+        message: errorMessage || 'Failed to create terminal session',
+        from,
+        srcId
+      }
+    })
+  }
+
+  handleEditBookmarkFromError = () => {
+    const error = this.state.terminalError
+    if (!error || error.from !== 'bookmarks' || !error.srcId) {
+      return
+    }
+    const item = window.store.bookmarksMap?.get(error.srcId) ||
+      window.store.bookmarks?.find(d => d.id === error.srcId)
+    if (!item) {
+      return
+    }
+    window.store.openBookmarkEdit(item)
   }
 
   initSocketEvents = () => {
@@ -1460,31 +1480,8 @@ class Term extends Component {
       return this.props.delTab(this.props.tab.id)
     }
     const { autoReconnectTerminal } = this.props.config
-    const isActive = this.isActiveTerminal()
-    const isFocused = window.focused
     if (autoReconnectTerminal) {
-      if (isActive && isFocused) {
-        this.socketCloseWarning = showSocketCloseWarning({
-          tabId: this.props.tab.id,
-          tab: this.props.tab,
-          autoReconnect: true,
-          delTab: this.props.delTab,
-          reloadTab: this.props.reloadTab
-        })
-      } else {
-        this.scheduleAutoReconnect(3000)
-      }
-    } else {
-      if (!isActive || !isFocused) {
-        return false
-      }
-      this.socketCloseWarning = showSocketCloseWarning({
-        tabId: this.props.tab.id,
-        tab: this.props.tab,
-        autoReconnect: false,
-        delTab: this.props.delTab,
-        reloadTab: this.props.reloadTab
-      })
+      this.scheduleAutoReconnect(3000)
     }
   }
 
@@ -1639,9 +1636,13 @@ class Term extends Component {
           <RemoteFloatControl
             isFullScreen={fullscreen}
           />
+          <TerminalErrorHandle
+            errorMessage={this.state.terminalError?.message}
+            showEditBookmarkButton={this.state.terminalError?.from === 'bookmarks' && !!this.state.terminalError?.srcId}
+            onEditBookmark={this.handleEditBookmarkFromError}
+          />
           <ReconnectOverlay
             countdown={this.state.reconnectCountdown}
-            onCancel={this.handleCancelAutoReconnect}
           />
           <DropFileModal
             visible={this.state.dropFileModalVisible}

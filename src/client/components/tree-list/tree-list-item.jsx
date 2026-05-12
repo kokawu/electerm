@@ -2,164 +2,40 @@
  * tree list for bookmarks
  */
 
-import {
-  CloseOutlined,
-  CopyOutlined,
-  EditOutlined,
-  FolderAddOutlined,
-  FolderOpenOutlined,
-  RightSquareOutlined
-} from '@ant-design/icons'
-import {
-  Popconfirm,
-  Tooltip
-} from 'antd'
+import { memo } from 'react'
 import createName, { createTitleTag } from '../../common/create-title'
 import classnames from 'classnames'
-import {
-  defaultBookmarkGroupId
-} from '../../common/constants'
 import highlight from '../common/highlight'
 import uid from '../../common/uid'
 
-const e = window.translate
+function getItemLabel (item, isGroup) {
+  return isGroup
+    ? item?.title || ''
+    : createName(item)
+}
 
-export default function TreeListItem (props) {
-  const handleDel = (e) => {
-    props.del(props.item, e)
-  }
+function areEqual (prevProps, nextProps) {
+  const prevSelected = prevProps.selectedItemId === prevProps.item.id
+  const nextSelected = nextProps.selectedItemId === nextProps.item.id
+  const prevSearchSelected = Boolean(prevProps.searchSelected)
+  const nextSearchSelected = Boolean(nextProps.searchSelected)
 
-  const renderDelBtn = (item) => {
-    if (props.item.id === defaultBookmarkGroupId || props.staticList) {
-      return null
-    }
-    return (
-      <Popconfirm
-        title={e('del') + '?'}
-        onConfirm={handleDel}
-        okText={e('del')}
-        cancelText={e('cancel')}
-        placement='top'
-      >
-        <CloseOutlined title={e('del')} className='pointer tree-control-btn' />
-      </Popconfirm>
-    )
-  }
+  return prevProps.isGroup === nextProps.isGroup &&
+    prevProps.parentId === nextProps.parentId &&
+    prevProps.staticList === nextProps.staticList &&
+    prevProps.keyword === nextProps.keyword &&
+    prevSelected === nextSelected &&
+    prevSearchSelected === nextSearchSelected &&
+    prevProps.item.id === nextProps.item.id &&
+    prevProps.item.level === nextProps.item.level &&
+    prevProps.item.color === nextProps.item.color &&
+    prevProps.item.description === nextProps.item.description &&
+    getItemLabel(prevProps.item, prevProps.isGroup) === getItemLabel(nextProps.item, nextProps.isGroup)
+}
 
-  const renderOperationBtn = (item, isGroup) => {
-    if (props.staticList || props.item.id === defaultBookmarkGroupId) {
-      return null
-    }
-    return (
-      <RightSquareOutlined
-        className='pointer tree-control-btn'
-        onClick={openMoveModal}
-      />
-    )
-  }
-
-  const handleOpenAll = () => {
-    props.openAll(props.item)
-  }
-
-  const openMoveModal = (e) => {
-    props.openMoveModal(e, props.item, props.isGroup)
-  }
-
-  const handleEditItem = (e) => {
-    props.editItem(e, props.item, props.isGroup)
-  }
-
-  const handleAddSubCat = (e) => {
-    props.addSubCat(e, props.item)
-  }
-
-  const renderAddNewSubGroupBtn = () => {
-    if (props.staticList) {
-      return null
-    }
-    return (
-      <FolderAddOutlined
-        key='new-tree'
-        title={`${e('new')} ${e('bookmarkCategory')}`}
-        onClick={handleAddSubCat}
-        className='pointer tree-control-btn'
-      />
-    )
-  }
-
-  const renderEditBtn = () => {
-    const {
-      isGroup, staticList
-    } = props
-    if (
-      (staticList && isGroup) ||
-      (!staticList && !isGroup)
-    ) {
-      return null
-    }
-    return (
-      <EditOutlined
-        title={e('edit')}
-        key='edit-tree'
-        onClick={handleEditItem}
-        className='pointer edit-icon tree-control-btn'
-      />
-    )
-  }
-
+function TreeListItem (props) {
   const onSelect = (e) => {
     props.onSelect(e)
-  }
-
-  const renderOpenAll = () => {
-    const {
-      staticList,
-      isGroup
-    } = props
-    if (
-      (staticList && !isGroup) ||
-      !staticList
-    ) {
-      return null
-    }
-    return (
-      <Tooltip title={e('openAll')}>
-        <FolderOpenOutlined
-          key='open-all-tree'
-          onClick={handleOpenAll}
-          className='pointer open-all-icon tree-control-btn'
-        />
-      </Tooltip>
-    )
-  }
-
-  const handleDuplicateItem = (e) => {
-    props.duplicateItem(e, props.item)
-  }
-
-  const renderDuplicateBtn = () => {
-    const {
-      item,
-      staticList
-    } = props
-    if (!item.id || staticList) {
-      return null
-    }
-    return (
-      <CopyOutlined
-        title={e('duplicate')}
-        className='pointer tree-control-btn'
-        onClick={handleDuplicateItem}
-      />
-    )
-  }
-
-  const renderGroupBtns = () => {
-    return [
-      renderAddNewSubGroupBtn(),
-      renderOpenAll()
-    ]
   }
 
   const onDragOver = e => {
@@ -189,7 +65,8 @@ export default function TreeListItem (props) {
   } = props
   const cls = classnames(
     {
-      selected: selectedItemId === item.id
+      selected: selectedItemId === item.id,
+      'search-selected': props.searchSelected
     },
     'tree-item',
     {
@@ -249,19 +126,8 @@ export default function TreeListItem (props) {
       >
         {colorTag}{tag}{titleHighlight}
       </div>
-      {
-        isGroup
-          ? renderGroupBtns()
-          : null
-      }
-      {
-        !isGroup
-          ? renderDuplicateBtn()
-          : null
-      }
-      {renderOperationBtn()}
-      {renderDelBtn()}
-      {renderEditBtn()}
     </div>
   )
 }
+
+export default memo(TreeListItem, areEqual)
