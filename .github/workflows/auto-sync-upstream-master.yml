@@ -1,0 +1,123 @@
+name: Auto Sync Upstream Master
+
+on:
+  schedule:
+    - cron: '17 2 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Check only, do not push master
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: auto-sync-upstream-master
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.x
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Fetch origin and upstream
+        run: |
+          git remote remove upstream 2>/dev/null || true
+          git remote add upstream https://github.com/electerm/electerm.git
+          git fetch origin master --no-tags --force
+          git fetch upstream master --no-tags --force
+
+      - name: Check sync safety
+        id: safety
+        run: |
+          if git merge-base --is-ancestor upstream/master origin/master; then
+            echo "needs_sync=false" >> "$GITHUB_OUTPUT"
+            {
+              echo "### Upstream Sync"
+              echo ""
+              echo "No sync needed. \`origin/master\` already contains \`upstream/master\`."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          base="$(git merge-base origin/master upstream/master)"
+          mkdir -p /tmp/upstream-sync
+
+          git diff --name-only "$base"..upstream/master | sort -u > /tmp/upstream-sync/upstream-files.txt
+          git diff --name-only "$base"..origin/master | sort -u > /tmp/upstream-sync/fork-files.txt
+          comm -12 /tmp/upstream-sync/upstream-files.txt /tmp/upstream-sync/fork-files.txt > /tmp/upstream-sync/overlap-files.txt
+
+          upstream_sha="$(git rev-parse upstream/master)"
+          origin_sha="$(git rev-parse origin/master)"
+
+          {
+            echo "### Upstream Sync"
+            echo ""
+            echo "- Base: \`$base\`"
+            echo "- Origin master: \`$origin_sha\`"
+            echo "- Upstream master: \`$upstream_sha\`"
+            echo "- Upstream changed files: \`$(wc -l < /tmp/upstream-sync/upstream-files.txt)\`"
+            echo "- Fork changed files: \`$(wc -l < /tmp/upstream-sync/fork-files.txt)\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ -s /tmp/upstream-sync/overlap-files.txt ]; then
+            {
+              echo ""
+              echo "Sync stopped because upstream changed files that this fork also changes."
+              echo ""
+              echo "Overlapping files:"
+              sed 's/^/- `/' /tmp/upstream-sync/overlap-files.txt | sed 's/$/`/'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+          echo "needs_sync=true" >> "$GITHUB_OUTPUT"
+          echo "base=$base" >> "$GITHUB_OUTPUT"
+
+      - name: Merge upstream master
+        if: steps.safety.outputs.needs_sync == 'true'
+        run: |
+          git checkout -B auto/sync-upstream-master origin/master
+          git merge --no-ff --no-edit upstream/master
+
+      - name: Install dependencies
+        if: steps.safety.outputs.needs_sync == 'true'
+        run: |
+          npm config set legacy-peer-deps true
+          npm ci --legacy-peer-deps
+
+      - name: Run checks
+        if: steps.safety.outputs.needs_sync == 'true'
+        run: |
+          npm run lint
+          npm run test-unit-ci
+
+      - name: Push master
+        if: steps.safety.outputs.needs_sync == 'true' && (github.event_name != 'workflow_dispatch' || inputs.dry_run != true)
+        run: git push origin HEAD:master
+
+      - name: Report dry run
+        if: steps.safety.outputs.needs_sync == 'true' && github.event_name == 'workflow_dispatch' && inputs.dry_run == true
+        run: |
+          {
+            echo ""
+            echo "Dry run completed. The merge and checks passed, but \`master\` was not pushed."
+          } >> "$GITHUB_STEP_SUMMARY"
