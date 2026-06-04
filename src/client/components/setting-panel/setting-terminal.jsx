@@ -28,6 +28,7 @@ import { chooseSaveDirectory } from '../../common/choose-save-folder'
 import mapper from '../../common/auto-complete-data-mapper'
 import KeywordForm from './keywords-form'
 import Link from '../common/external-link'
+import FontSelect from '../common/font-select'
 import HelpIcon from '../common/help-icon'
 import KeywordsTransport from './keywords-transport'
 import fs from '../../common/fs'
@@ -84,6 +85,7 @@ export default class SettingTerminal extends Component {
 
   handleChangeDelMode = v => this.onChangeValue(v, 'backspaceMode')
   handleChangeRenderType = v => this.onChangeValue(v, 'rendererType')
+  handleChangeDragDropBehavior = v => this.onChangeValue(v, 'dragDropBehavior')
 
   handleChangeFont = (values) => {
     this.onChangeValue(
@@ -426,36 +428,13 @@ export default class SettingTerminal extends Component {
   }
 
   renderFontFamily = () => {
-    const { fonts = [] } = window.et
     const { fontFamily } = this.props.config
-    const props = {
-      mode: 'multiple',
-      onChange: this.handleChangeFont,
-      value: fontFamily.split(/, */g).filter(d => d.trim()),
-      style: { width: '100%' }
-    }
     return (
-      <Select
-        {...props}
-        showSearch
-      >
-        {
-          fonts.map(f => {
-            return (
-              <Option value={f} key={f}>
-                <span
-                  className='font-option'
-                  style={{
-                    fontFamily: f
-                  }}
-                >
-                  {f}
-                </span>
-              </Option>
-            )
-          })
-        }
-      </Select>
+      <FontSelect
+        onChange={this.handleChangeFont}
+        value={fontFamily.split(/, */g).filter(d => d.trim())}
+        style={{ width: '100%' }}
+      />
     )
   }
 
@@ -471,6 +450,7 @@ export default class SettingTerminal extends Component {
     const {
       rendererType,
       backspaceMode = '^?',
+      dragDropBehavior = 'ask',
       keywords = [{ color: 'red' }]
     } = this.props.config
     const {
@@ -593,6 +573,16 @@ export default class SettingTerminal extends Component {
             'autoReconnectTerminal'
           ].map(d => this.renderToggle(d))
         }
+        <div className='pd1b'>{e('dragDropBehavior')}</div>
+        <Select
+          onChange={this.handleChangeDragDropBehavior}
+          value={dragDropBehavior}
+          popupMatchSelectWidth={false}
+        >
+          {['ask', 'trz', 'rz', 'inputOnly'].map(id => (
+            <Option key={id} value={id}>{e(id)}</Option>
+          ))}
+        </Select>
         <div className='pd1b'>{e('terminalBackSpaceMode')}</div>
         <Select
           onChange={this.handleChangeDelMode}

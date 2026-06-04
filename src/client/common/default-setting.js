@@ -64,6 +64,7 @@ export default {
   ],
   hideIP: false,
   dataSyncSelected: 'all',
+  nameAI: '',
   baseURLAI: 'https://api.atlascloud.ai/v1',
   modelAI: 'deepseek-chat',
   roleAI: '终端专家,提供不同系统下命令,简要解释用法,用markdown格式',
@@ -75,5 +76,6 @@ export default {
   autoReconnectTerminal: false,
   startDirectoryLocal: '',
   allowMultiInstance: false,
-  disableDeveloperTool: false
+  disableDeveloperTool: false,
+  dragDropBehavior: 'ask'
 }

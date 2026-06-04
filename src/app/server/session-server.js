@@ -21,7 +21,8 @@ const {
   runCmd,
   toggleTerminalLog,
   toggleTerminalLogTimestamp,
-  setTerminalLogPath
+  setTerminalLogPath,
+  startTerminalLogFile
 } = require('./session-api')
 const {
   isWin
@@ -29,6 +30,7 @@ const {
 const wsDec = require('./ws-dec')
 const { zmodemManager } = require('./zmodem')
 const { trzszManager } = require('./trzsz')
+const { xmodemManager } = require('./xmodem')
 
 const {
   tokenElecterm,
@@ -36,6 +38,12 @@ const {
   wsPort,
   type
 } = process.env
+
+// Track whether any WebSocket has connected to detect orphaned processes
+let firstWsConnected = false
+function markConnected () {
+  firstWsConnected = true
+}
 
 function verify (req) {
   const { token: to } = req.query
@@ -50,6 +58,7 @@ if (type === 'rdp') {
   app.ws('/rdp/:pid', function (ws, req) {
     const { width, height } = req.query
     verify(req)
+    markConnected()
     const term = terminals(req.params.pid)
     term.ws = ws
     log.debug('ws: connected to rdp session ->', term.pid, 'width=', width, 'height=', height)
@@ -66,6 +75,7 @@ if (type === 'rdp') {
   app.ws('/vnc/:pid', function (ws, req) {
     const { query } = req
     verify(req)
+    markConnected()
     const { pid } = req.params
     const term = terminals(pid)
     term.ws = ws
@@ -82,6 +92,7 @@ if (type === 'rdp') {
   app.ws('/spice/:pid', function (ws, req) {
     const { query } = req
     verify(req)
+    markConnected()
     const { pid } = req.params
     const term = terminals(pid)
     log.debug('ws: connected to spice session ->', pid)
@@ -93,6 +104,7 @@ if (type === 'rdp') {
 } else {
   app.ws('/terminals/:pid', function (ws, req) {
     verify(req)
+    markConnected()
     const term = terminals(req.params.pid)
     const { pid } = term
     log.debug('ws: connected to terminal ->', pid)
@@ -124,7 +136,19 @@ if (type === 'rdp') {
         return
       }
 
-      // Not zmodem or trzsz data, send to WebSocket
+      // Detect XMODEM auto-trigger markers from serial device
+      if (term.port) {
+        detectXmodemMarker(combinedData.toString('utf8'))
+      }
+
+      // Check for xmodem protocol before sending to client
+      const xmodemConsumed = xmodemManager.handleData(pid, combinedData, term, ws)
+      if (xmodemConsumed) {
+        sendTimeout = null
+        return
+      }
+
+      // Not zmodem, trzsz, or xmodem data, send to WebSocket
       ws.send(combinedData)
       sendTimeout = null
     }
@@ -132,6 +156,27 @@ if (type === 'rdp') {
     // Create ws.s function for zmodem to send messages to client
     ws.s = (data) => {
       ws.send(JSON.stringify(data))
+    }
+
+    // Auto-trigger XMODEM when the serial device sends a marker message.
+    // The serial-shell.js sends these markers when the user types tx/rx.
+    function detectXmodemMarker (text) {
+      const txMatch = text.match(/\[XMODEM:TX:(.+?)\]/)
+      if (txMatch) {
+        ws.s({
+          action: 'xmodem-event',
+          event: 'auto-trigger-receive',
+          name: txMatch[1]
+        })
+        return
+      }
+      const rxMatch = text.match(/\[XMODEM:RX\]/)
+      if (rxMatch) {
+        ws.s({
+          action: 'xmodem-event',
+          event: 'auto-trigger-send'
+        })
+      }
     }
 
     // In the WebSocket setup, replace the data handler:
@@ -149,6 +194,24 @@ if (type === 'rdp') {
         // Let trzsz handle the data, but still log it
         term.writeLog(data)
         trzszManager.handleData(pid, data, term, ws)
+        return
+      }
+
+      // Detect XMODEM auto-trigger markers from serial device
+      if (term.port) {
+        const text = Buffer.isBuffer(data) ? data.toString('utf8') : data
+        detectXmodemMarker(text)
+      }
+
+      // Check if xmodem session is active and handle data.
+      // For serial terminals (term.port exists) a raw port listener (registered below)
+      // bypasses rxLineEnding transformation and feeds raw bytes to xmodem.
+      if (xmodemManager.isActive(pid)) {
+        if (!term.port) {
+          // Non-serial fallback (should not normally happen)
+          term.writeLog(data)
+          xmodemManager.handleData(pid, data, term, ws)
+        }
         return
       }
 
@@ -172,6 +235,10 @@ if (type === 'rdp') {
         if (trzszConsumed) {
           return
         }
+        const xmodemConsumed = xmodemManager.handleData(pid, chunk, term, ws)
+        if (xmodemConsumed) {
+          return
+        }
         ws.send(chunk)
         return
       }
@@ -185,7 +252,21 @@ if (type === 'rdp') {
       }
     })
 
+    // For serial terminals, register a raw data listener directly on the port to
+    // feed binary XMODEM data to xmodemManager without rxLineEnding transformation.
+    if (term.port) {
+      term.port.on('data', function (rawData) {
+        if (xmodemManager.isActive(pid)) {
+          term.writeLog(rawData)
+          xmodemManager.handleData(pid, rawData, term, ws)
+        }
+      })
+    }
+
+    let onCloseCalled = false
     function onClose () {
+      if (onCloseCalled) return
+      onCloseCalled = true
       // Cancel any pending batched send
       if (sendTimeout) {
         clearTimeout(sendTimeout)
@@ -196,6 +277,8 @@ if (type === 'rdp') {
       zmodemManager.destroySession(pid)
       // Clean up trzsz session
       trzszManager.destroySession(pid)
+      // Clean up xmodem session
+      xmodemManager.destroySession(pid)
       term.kill()
       log.debug('Closed terminal ' + pid)
       // Clean things up
@@ -220,6 +303,10 @@ if (type === 'rdp') {
             }
             if (parsed.action === 'trzsz-event') {
               trzszManager.handleMessage(pid, parsed, term, ws)
+              return
+            }
+            if (parsed.action === 'xmodem-event') {
+              xmodemManager.handleMessage(pid, parsed, term, ws)
               return
             }
             if (parsed.action === 'keepalive') {
@@ -366,7 +453,7 @@ process.on('message', async (message) => {
     if (action === 'create-terminal') {
       promise = createTerm(body, ws)
     } else if (action === 'test-terminal') {
-      promise = testTerm(body)
+      promise = testTerm(body, ws)
     } else if (action === 'resize-terminal') {
       promise = resize(body)
     } else if (action === 'toggle-terminal-log') {
@@ -375,6 +462,8 @@ process.on('message', async (message) => {
       promise = toggleTerminalLogTimestamp(body)
     } else if (action === 'set-terminal-log-path') {
       promise = setTerminalLogPath(body)
+    } else if (action === 'start-terminal-log-file') {
+      promise = startTerminalLogFile(body)
     } else if (action === 'run-cmd') {
       promise = runCmd(body)
     }
@@ -418,12 +507,32 @@ async function main () {
 
 main()
 
+let cleanupCalled = false
 function cleanup () {
+  if (cleanupCalled) return
+  cleanupCalled = true
   cleanAllSessions()
   setTimeout(() => {
     process.exit(0)
   }, 2000)
 }
+
+// Self-terminate if the parent process IPC channel disconnects (e.g. Electron crashes/restarts)
+// Without this, child processes become orphans and accumulate in memory
+process.on('disconnect', () => {
+  log.warn('session-server: parent IPC disconnected, terminating')
+  cleanup()
+})
+
+// Self-terminate if no WebSocket connects within 2 minutes of server start
+// This handles the case where the frontend unmounts before the WebSocket is established
+const noConnectionTimer = setTimeout(() => {
+  if (!firstWsConnected) {
+    log.warn('session-server: no WS connection within 2min timeout, terminating')
+    cleanup()
+  }
+}, 120000)
+if (noConnectionTimer.unref) noConnectionTimer.unref()
 
 process.on('uncaughtException', (err) => {
   log.error('uncaughtException', err)

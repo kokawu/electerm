@@ -24,7 +24,11 @@ import {
   LockOutlined,
   ReloadOutlined,
   FileZipOutlined,
-  AppstoreOutlined
+  AppstoreOutlined,
+  SaveOutlined,
+  PlayCircleFilled,
+  StopOutlined,
+  DownloadOutlined
 } from '@ant-design/icons'
 import IconHolder from './icon-holder'
 
@@ -52,5 +56,9 @@ export default {
   LockOutlined,
   ReloadOutlined,
   FileZipOutlined,
-  AppstoreOutlined
+  AppstoreOutlined,
+  SaveOutlined,
+  PlayCircleFilled,
+  StopOutlined,
+  DownloadOutlined
 }

@@ -69,7 +69,7 @@ const { safeEncrypt, safeDecrypt } = require('./safe-storage')
 const { initCommandLine } = require('./command-line')
 const { watchFile, unwatchFile } = require('./watch-file')
 const lookup = require('../common/lookup')
-const { AIchat, getStreamContent, stopStream } = require('./ai')
+const { AIchat, AIchatWithTools, getStreamContent, stopStream } = require('./ai')
 
 // Security: whitelist of safe environment variables for Linux/Mac/Windows
 const SAFE_ENV_KEYS = [
@@ -205,6 +205,7 @@ function initIpc () {
     },
     saveUserConfig,
     AIchat,
+    AIchatWithTools,
     getStreamContent,
     stopStream,
     setTitle: (title) => {
@@ -245,6 +246,10 @@ function initIpc () {
   ipcMain.handle('show-open-dialog-sync', async (event, ...args) => {
     const win = BrowserWindow.fromWebContents(event.sender)
     return dialog.showOpenDialogSync(win, ...args)
+  })
+  ipcMain.handle('show-save-dialog', async (event, ...args) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    return dialog.showSaveDialog(win, ...args)
   })
 }
 

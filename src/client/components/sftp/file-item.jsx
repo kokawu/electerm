@@ -14,6 +14,7 @@ import copy from 'json-deep-copy'
 import { pick, some } from 'lodash-es'
 import Input from '../common/input-auto-focus'
 import resolve from '../../common/resolve'
+import normalizeRemotePath from '../../common/normalize-remote-path'
 import { addClass, removeClass } from '../../common/class'
 import {
   mode2permission,
@@ -36,6 +37,7 @@ import time from '../../common/time'
 import { filesize } from 'filesize'
 import { createTransferProps } from './transfer-common'
 import generate from '../../common/uid'
+import sanitizeFilename from '../../common/sanitize-filename'
 import { refsStatic, refs, filesRef } from '../common/ref'
 import iconsMap from '../sys-menu/icons-map'
 
@@ -174,7 +176,7 @@ export default class FileSection extends React.Component {
         ? item.replace(/^remote:/, '')
         : item
       const { name } = getFolderFromFilePath(fromPath, isRemote)
-      const toPath = resolve(path, name)
+      const toPath = resolve(path, sanitizeFilename(name))
       res.push({
         typeFrom: isRemote ? typeMap.remote : typeMap.local,
         typeTo: type,
@@ -270,7 +272,7 @@ export default class FileSection extends React.Component {
     if (!toFile.id || !toFile.isDirectory) {
       toFile = {
         type,
-        ...getFolderFromFilePath(this.props[type + 'Path']),
+        ...getFolderFromFilePath(this.props[type + 'Path'], type === typeMap.remote),
         isDirectory: false
       }
     }
@@ -326,7 +328,7 @@ export default class FileSection extends React.Component {
         toFile = {
           ...toFile,
           ...getFolderFromFilePath(
-            resolve(toFile.path, toFile.name)
+            resolve(toFile.path, sanitizeFilename(toFile.name))
           ),
           id: undefined
         }
@@ -367,7 +369,7 @@ export default class FileSection extends React.Component {
     return this.doTransferSelected(
       null,
       files,
-      resolve(toFile.path, toFile.name),
+      resolve(toFile.path, sanitizeFilename(toFile.name)),
       toFile.type,
       operation
     )
@@ -603,7 +605,10 @@ export default class FileSection extends React.Component {
     const { type, name, isParent } = file
     const n = `${type}Path`
     const path = isParent ? file.path : this.props[n]
-    const np = resolve(path, name)
+    let np = resolve(path, name)
+    if (type === typeMap.remote) {
+      np = normalizeRemotePath(np)
+    }
     const op = this.props[type + 'Path']
     this.props.modifier({
       [n]: np,
@@ -692,9 +697,20 @@ export default class FileSection extends React.Component {
     const {
       path, name
     } = this.state.file
-    const rp = path ? resolve(path, name) : this.props[`${this.props.type}Path`]
+    let rp = path ? resolve(path, name) : this.props[`${this.props.type}Path`]
+    if (this.props.type === typeMap.remote) {
+      rp = this.convertSftpPathToTerminalPath(rp)
+    }
     this.props.tab.pane = paneMap.terminal
     refs.get('term-' + this.props.tab.id)?.cd(rp)
+  }
+
+  convertSftpPathToTerminalPath = (p) => {
+    const m = p.match(/^\/([a-zA-Z]:)(.*)$/)
+    if (m) {
+      return m[1] + m[2].replace(/\//g, '\\')
+    }
+    return p
   }
 
   fetchEditorText = async (path, type) => {
@@ -784,7 +800,7 @@ export default class FileSection extends React.Component {
     if (toPathBase) {
       toPath = toPathBase
     }
-    toPath = resolve(toPath, name)
+    toPath = resolve(toPath, sanitizeFilename(name))
     const obj = {
       host: this.props.tab?.host,
       tabType: this.props.tab?.type,
@@ -879,6 +895,25 @@ export default class FileSection extends React.Component {
     const { path, name } = this.state.file
     const p = resolve(path, name)
     window.pre.showItemInFolder(p)
+  }
+
+  downloadFromBrowser = async () => {
+    const { path, name, isDirectory } = this.state.file
+    const p = resolve(path, name)
+    const url = '/api/download?path=' + encodeURIComponent(p)
+    const res = await window.fetch(url, {
+      headers: {
+        token: window.store?.config.tokenElecterm
+      }
+    })
+    const blob = await res.blob()
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = isDirectory ? name + '.tar.gz' : name
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(a.href)
   }
 
   newItem = (isDirectory) => {
@@ -1057,6 +1092,13 @@ export default class FileSection extends React.Component {
         func: 'showInDefaultFileManager',
         icon: 'ContainerOutlined',
         text: e('showInDefaultFileMananger')
+      })
+    }
+    if (isLocal && isRealFile && window.et.isWebApp) {
+      res.push({
+        func: 'downloadFromBrowser',
+        icon: 'DownloadOutlined',
+        text: 'Download from browser'
       })
     }
     if (showEdit) {

@@ -49,8 +49,8 @@ async function createTerm (body, ws) {
   return t.pid
 }
 
-async function testTerm (body) {
-  const r = await startSession(body, undefined, 'test')
+async function testTerm (body, ws) {
+  const r = await startSession(body, ws, 'test')
   if (r) {
     return r
   } else {
@@ -67,6 +67,15 @@ async function setTerminalLogPath (body) {
   return 'ok'
 }
 
+async function startTerminalLogFile (body) {
+  const { pid, logFilePath, addTimeStampToTermLog } = body
+  const term = terminals(pid)
+  if (term) {
+    term.startTerminalLogFile(logFilePath, addTimeStampToTermLog)
+  }
+  return 'ok'
+}
+
 exports.createTerm = createTerm
 exports.testTerm = testTerm
 exports.resize = resize
@@ -74,3 +83,4 @@ exports.runCmd = runCmd
 exports.toggleTerminalLog = toggleTerminalLog
 exports.toggleTerminalLogTimestamp = toggleTerminalLogTimestamp
 exports.setTerminalLogPath = setTerminalLogPath
+exports.startTerminalLogFile = startTerminalLogFile

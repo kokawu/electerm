@@ -7,6 +7,8 @@ import {
   Dropdown
 } from 'antd'
 import message from '../common/message'
+import { notification } from '../common/notification'
+import ShowItem from '../common/show-item.jsx'
 import Modal from '../common/modal'
 import classnames from 'classnames'
 import './terminal.styl'
@@ -26,14 +28,17 @@ import AttachAddon from './attach-addon-custom.js'
 import getProxy from '../../common/get-proxy.js'
 import { ZmodemClient } from './zmodem-client.js'
 import { TrzszClient } from './trzsz-client.js'
+import { XmodemClient } from './xmodem-client.js'
 import DropFileModal from './drop-file-modal.jsx'
 import keyControlPressed from '../../common/key-control-pressed.js'
 import NormalBuffer from './normal-buffer.jsx'
-import { createTerm, resizeTerm } from './terminal-apis.js'
+import { createTerm, resizeTerm, startTerminalLogFile, toggleTerminalLog } from './terminal-apis.js'
 import { shortcutExtend, shortcutDescExtend } from '../shortcuts/shortcut-handler.js'
 import { KeywordHighlighterAddon } from './highlight-addon.js'
 import { getFilePath, isUnsafeFilename } from '../../common/file-drop-utils.js'
+import { getFolderFromFilePath } from '../sftp/file-read.js'
 import { CommandTrackerAddon } from './command-tracker-addon.js'
+import { Osc52Addon } from './osc52-addon.js'
 import AIIcon from '../icons/ai-icon.jsx'
 import {
   getShellIntegrationCommand,
@@ -71,6 +76,9 @@ class Term extends Component {
       saveTerminalLogToFile: !!this.props.config.saveTerminalLogToFile,
       addTimeStampToTermLog: !!this.props.config.addTimeStampToTermLog,
       logPath: this.props.config.sessionLogPath || createDefaultLogPath(),
+      logFileName: '',
+      recording: false,
+      recordingFilePath: '',
       passType: 'password',
       lines: [],
       searchResults: [],
@@ -171,6 +179,7 @@ class Term extends Component {
     this.fitAddon = null
     this.zmodemClient = null
     this.trzszClient = null
+    this.xmodemClient = null
     this.searchAddon = null
     this.fitAddon = null
     this.cmdAddon = null
@@ -243,6 +252,9 @@ class Term extends Component {
       this.encode || this.props.tab.encode || 'utf-8'
     )
     await this.attachAddon.activate(this.term)
+    if (this.osc52Addon) {
+      this.osc52Addon.setSendData(this.attachAddon._sendData.bind(this.attachAddon))
+    }
   }
 
   getValue = (props, type, name) => {
@@ -431,7 +443,8 @@ class Term extends Component {
     if (isUnsafeFilename(p)) {
       return message.error('File name contains unsafe characters')
     }
-    this.runQuickCommand(`cd "${p}"`)
+    const isWinPath = /^[a-zA-Z]:\\/.test(p)
+    this.runQuickCommand(isWinPath ? `cd /d "${p}"` : `cd "${p}"`)
   }
 
   onDrop = e => {
@@ -439,6 +452,7 @@ class Term extends Component {
     const fromFile = dt.getData('fromFile')
     const notSafeMsg = 'File name contains unsafe characters'
     const isSshTerminal = this.props.tab.type === connectionMap.ssh
+    const isSerialTerminal = this.props.tab.type === connectionMap.serial
 
     if (fromFile) {
       try {
@@ -449,9 +463,21 @@ class Term extends Component {
           return
         }
         if (isSshTerminal) {
+          const behavior = this.props.config.dragDropBehavior || 'ask'
+          if (behavior === 'ask') {
+            this.setState({
+              dropFileModalVisible: true,
+              droppedFiles: [{ path: filePath, isRemote: true }]
+            })
+          } else {
+            this.handleDropFileAction(behavior, [{ path: filePath, isRemote: true }])
+          }
+          return
+        }
+        if (isSerialTerminal) {
           this.setState({
             dropFileModalVisible: true,
-            droppedFiles: [{ path: filePath, isRemote: true }]
+            droppedFiles: [{ path: filePath, isRemote: false }]
           })
           return
         }
@@ -474,6 +500,19 @@ class Term extends Component {
       }
 
       if (isSshTerminal) {
+        const behavior = this.props.config.dragDropBehavior || 'ask'
+        if (behavior === 'ask') {
+          this.setState({
+            dropFileModalVisible: true,
+            droppedFiles: filePaths.map(path => ({ path, isRemote: false }))
+          })
+        } else {
+          this.handleDropFileAction(behavior, filePaths.map(path => ({ path, isRemote: false })))
+        }
+        return
+      }
+
+      if (isSerialTerminal) {
         this.setState({
           dropFileModalVisible: true,
           droppedFiles: filePaths.map(path => ({ path, isRemote: false }))
@@ -493,8 +532,8 @@ class Term extends Component {
     })
   }
 
-  handleDropFileAction = (action) => {
-    const { droppedFiles } = this.state
+  handleDropFileAction = (action, filesOverride) => {
+    const droppedFiles = filesOverride || this.state.droppedFiles
     if (!droppedFiles || !droppedFiles.length) {
       this.handleDropFileModalCancel()
       return
@@ -503,7 +542,7 @@ class Term extends Component {
     const filePaths = droppedFiles.map(f => f.path)
 
     switch (action) {
-      case 'trzUpload': {
+      case 'trz': {
         if (this.trzszClient && this.trzszClient.isActive) {
           message.warning('A transfer is already in progress')
           this.handleDropFileModalCancel()
@@ -513,7 +552,7 @@ class Term extends Component {
         this.attachAddon._sendData('trz\r')
         break
       }
-      case 'rzUpload': {
+      case 'rz':{
         if (this.zmodemClient && this.zmodemClient.isActive) {
           message.warning('A transfer is already in progress')
           this.handleDropFileModalCancel()
@@ -523,7 +562,20 @@ class Term extends Component {
         this.attachAddon._sendData('rz\r')
         break
       }
-      case 'inputPath':
+      case 'xmodem': {
+        if (this.xmodemClient && this.xmodemClient.isActive) {
+          message.warning('A transfer is already in progress')
+          this.handleDropFileModalCancel()
+          return
+        }
+        // Use XMODEM send with the dropped files
+        window._apiControlSelectFile = filePaths
+        if (this.xmodemClient) {
+          this.xmodemClient.initiateSend()
+        }
+        break
+      }
+      case 'inputOnly':
       default: {
         const filesAll = filePaths.map(path => `"${path}"`).join(' ')
         this.attachAddon._sendData(filesAll)
@@ -722,15 +774,109 @@ class Term extends Component {
     )
   }
 
+  getTerminalBufferText = () => {
+    const { addTimeStampToTermLog } = this.state
+    const buffer = this.term.buffer.active
+    const len = buffer.length
+    const rawLines = []
+    for (let i = 0; i < len; i++) {
+      const line = buffer.getLine(i)
+      rawLines.push(line ? line.translateToString(false) : '')
+    }
+    // trim trailing blank lines before applying timestamps
+    while (rawLines.length && !rawLines[rawLines.length - 1].trim()) {
+      rawLines.pop()
+    }
+    if (!addTimeStampToTermLog) {
+      return rawLines.join('\n')
+    }
+    return rawLines.map(text => {
+      const now = new Date()
+      const ts = `[${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}.${String(now.getMilliseconds()).padStart(3, '0')}] `
+      return ts + text
+    }).join('\n')
+  }
+
+  syncTermInfo = (stateUpdate) => {
+    this.setState(stateUpdate)
+    const infoUpdate = pick(stateUpdate, ['saveTerminalLogToFile', 'addTimeStampToTermLog', 'logPath', 'logFileName'])
+    if (Object.keys(infoUpdate).length) {
+      refs.get('term-info-' + this.props.tab.id)?.setState(infoUpdate)
+    }
+  }
+
+  openLogSaveDialog = async (titleKey) => {
+    const { logName } = this.props
+    const result = await window.api.saveDialog({
+      title: e(titleKey),
+      defaultPath: logName + '.log',
+      filters: [
+        { name: 'Log files', extensions: ['log'] }
+      ],
+      properties: ['createDirectory', 'showOverwriteConfirmation']
+    })
+    if (result.canceled || !result.filePath) {
+      return null
+    }
+    return result.filePath
+  }
+
+  onSaveTerminalLog = async () => {
+    const filePath = await this.openLogSaveDialog('saveTerminalLogToFile')
+    if (!filePath) {
+      return
+    }
+    const content = this.getTerminalBufferText()
+    await window.fs.writeFile(filePath, content).catch(window.store.onError)
+    const { addTimeStampToTermLog } = this.state
+    startTerminalLogFile(this.pid, filePath, addTimeStampToTermLog).catch(window.store.onError)
+    const { path: logPath, name: logFileName } = getFolderFromFilePath(filePath, false)
+    this.syncTermInfo({ saveTerminalLogToFile: true, logPath, logFileName })
+    notification.success({
+      message: e('saveTerminalLogToFile'),
+      description: <ShowItem to={filePath}>{filePath}</ShowItem>,
+      duration: 5
+    })
+  }
+
+  onRecord = async () => {
+    const filePath = await this.openLogSaveDialog('record')
+    if (!filePath) {
+      return
+    }
+    const { addTimeStampToTermLog } = this.state
+    startTerminalLogFile(this.pid, filePath, addTimeStampToTermLog).catch(window.store.onError)
+    const { path: logPath, name: logFileName } = getFolderFromFilePath(filePath, false)
+    this.syncTermInfo({ saveTerminalLogToFile: true, logPath, logFileName })
+    this.setState({ recording: true, recordingFilePath: filePath })
+    notification.success({
+      message: e('record'),
+      description: <ShowItem to={filePath}>{filePath}</ShowItem>,
+      duration: 5
+    })
+  }
+
+  onStopRecord = () => {
+    const { recordingFilePath } = this.state
+    toggleTerminalLog(this.pid).catch(window.store.onError)
+    this.syncTermInfo({ saveTerminalLogToFile: false })
+    this.setState({ recording: false, recordingFilePath: '' })
+    notification.success({
+      message: e('stopRecord'),
+      description: <ShowItem to={recordingFilePath}>{recordingFilePath}</ShowItem>
+    })
+  }
+
   renderContextMenu = () => {
-    const { hasSelection } = this.state
+    const { hasSelection, recording } = this.state
     const copyed = true
     const copyShortcut = this.getShortcut('terminal_copy')
     const pasteShortcut = this.getShortcut('terminal_paste')
     const clearShortcut = this.getShortcut('terminal_clear')
     const searchShortcut = this.getShortcut('terminal_search')
     const selectAllShortcut = isMacJs ? 'meta+a' : 'ctrl+shift+a'
-    return [
+    const isSerial = this.props.tab?.type === connectionMap.serial
+    const items = [
       {
         key: 'onCopy',
         icon: <iconsMap.CopyOutlined />,
@@ -775,12 +921,54 @@ class Term extends Component {
         icon: <iconsMap.SearchOutlined />,
         label: e('search'),
         extra: searchShortcut
+      },
+      {
+        key: 'onSaveTerminalLog',
+        icon: <iconsMap.SaveOutlined />,
+        label: e('saveTerminalLogToFile')
+      },
+      {
+        key: recording ? 'onStopRecord' : 'onRecord',
+        icon: recording ? <iconsMap.StopOutlined /> : <iconsMap.PlayCircleFilled />,
+        label: e(recording ? 'stopRecord' : 'record')
       }
     ]
+    if (isSerial) {
+      items.push(
+        {
+          type: 'divider'
+        },
+        {
+          key: 'onXmodemSend',
+          icon: <iconsMap.CloudUploadOutlined />,
+          label: 'XMODEM Send'
+        },
+        {
+          key: 'onXmodemReceive',
+          icon: <iconsMap.CloudDownloadOutlined />,
+          label: 'XMODEM Receive'
+        }
+      )
+    }
+    return items
   }
 
   onContextMenu = ({ key }) => {
     this[key]()
+  }
+
+  onXmodemSend = () => {
+    if (this.xmodemClient) {
+      this.xmodemClient.initiateSend()
+    }
+    this.term.focus()
+  }
+
+  onXmodemReceive = () => {
+    if (this.xmodemClient) {
+      this.xmodemClient.initiateReceive()
+    }
+    this.term.focus()
   }
 
   notifyOnData = debounce(() => {
@@ -913,6 +1101,9 @@ class Term extends Component {
       if (currentCmd && currentCmd.trim() && this.shouldUseManualHistory()) {
         window.store.addCmdHistory(currentCmd.trim())
       }
+      if (currentCmd && currentCmd.trim() === 'exit') {
+        this.userTypeExit = true
+      }
       this.closeSuggestions()
     }
   }
@@ -1026,6 +1217,8 @@ class Term extends Component {
     term.loadAddon(this.fitAddon)
     term.loadAddon(this.searchAddon)
     term.loadAddon(this.cmdAddon)
+    this.osc52Addon = new Osc52Addon()
+    term.loadAddon(this.osc52Addon)
     if (tab.enableTerminalImage) {
       const ImageAddon = await loadImageAddon()
       this.imageAddon = new ImageAddon({
@@ -1342,6 +1535,17 @@ class Term extends Component {
           this.handleError({ message: text, from, srcId })
         }
       })
+    // Guard: component was unmounted while createTerm was pending.
+    // The child process is already running; connect briefly to trigger its cleanup.
+    if (this.onClose) {
+      if (r && r.port) {
+        try {
+          const tmpSock = new WebSocket(this.buildWsUrl(r.port))
+          tmpSock.onopen = () => tmpSock.close()
+        } catch (_e) {}
+      }
+      return
+    }
     if (typeof r === 'string' && r.includes('fail')) {
       return this.promote()
     }
@@ -1388,6 +1592,8 @@ class Term extends Component {
     this.zmodemClient.init(socket)
     this.trzszClient = new TrzszClient(this)
     this.trzszClient.init(socket)
+    this.xmodemClient = new XmodemClient(this)
+    this.xmodemClient.init(socket)
     this.fitAddon.fit()
     term.displayRaw = displayRaw
     term.loadAddon(
@@ -1650,6 +1856,7 @@ class Term extends Component {
           <DropFileModal
             visible={this.state.dropFileModalVisible}
             files={this.state.droppedFiles}
+            isSerial={this.props.tab?.type === connectionMap.serial}
             onSelect={this.handleDropFileAction}
             onCancel={this.handleDropFileModalCancel}
           />

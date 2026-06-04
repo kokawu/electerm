@@ -75,7 +75,7 @@ function createTerm (ws, msg) {
 
 function testTerm (ws, msg) {
   const { id, body } = msg
-  testConnection(body, id)
+  testConnection(body, ws, id)
     .then(data => {
       if (data) {
         ws.s({
@@ -92,6 +92,15 @@ function testTerm (ws, msg) {
         })
       }
     })
+    .catch(err => {
+      ws.s({
+        id,
+        error: {
+          message: err.message || 'test failed',
+          stack: err.stack || 'test failed'
+        }
+      })
+    })
 }
 
 function setTerminalLogPath (ws, msg) {
@@ -106,6 +115,18 @@ function setTerminalLogPath (ws, msg) {
   })
 }
 
+function startTerminalLogFile (ws, msg) {
+  const { id, pid, logFilePath, addTimeStampToTermLog } = msg
+  const term = terminals(pid)
+  if (term) {
+    term.startTerminalLogFile(id, logFilePath, addTimeStampToTermLog)
+  }
+  ws.s({
+    id,
+    data: 'ok'
+  })
+}
+
 exports.createTerm = createTerm
 exports.testTerm = testTerm
 exports.resize = resize
@@ -113,3 +134,4 @@ exports.runCmd = runCmd
 exports.toggleTerminalLog = toggleTerminalLog
 exports.toggleTerminalLogTimestamp = toggleTerminalLogTimestamp
 exports.setTerminalLogPath = setTerminalLogPath
+exports.startTerminalLogFile = startTerminalLogFile

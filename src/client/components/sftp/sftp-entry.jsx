@@ -29,6 +29,7 @@ import fs from '../../common/fs'
 import ListTable from './list-table-ui'
 import deepCopy from 'json-deep-copy'
 import isValidPath from '../../common/is-valid-path'
+import normalizeRemotePath from '../../common/normalize-remote-path'
 import { LoadingOutlined, ReloadOutlined } from '@ant-design/icons'
 import * as owner from './owner-list'
 import AddressBar from './address-bar'
@@ -292,6 +293,7 @@ export default class Sftp extends Component {
       if (!path && this.sftp) {
         path = await this.getPwd(this.props.tab.username)
       }
+      path = normalizeRemotePath(path)
     } else {
       path = this.getLocalHome()
     }
@@ -762,7 +764,7 @@ export default class Sftp extends Component {
 
       if (!remotePath) {
         if (startDirectory) {
-          remotePath = startDirectory
+          remotePath = normalizeRemotePath(startDirectory)
         } else {
           remotePath = await this.getPwd(username)
         }
@@ -970,6 +972,31 @@ export default class Sftp extends Component {
     })
   }
 
+  handleUploadFromBrowser = () => {
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.multiple = true
+    input.onchange = async () => {
+      const files = input.files
+      if (!files || !files.length) return
+      const { localPath } = this.state
+      for (const file of files) {
+        const formData = new FormData()
+        formData.append('file', file)
+        formData.append('path', localPath)
+        await window.fetch('/api/upload', {
+          method: 'POST',
+          body: formData,
+          headers: {
+            token: window.store?.config.tokenElecterm
+          }
+        })
+      }
+      this.localList()
+    }
+    input.click()
+  }
+
   parsePath = async (type, pth) => {
     const reg = /^%([^%]+)%/
     if (!reg.test(pth)) {
@@ -995,7 +1022,10 @@ export default class Sftp extends Component {
     const n = `${type}Path`
     const nt = n + 'Temp'
     const oldPath = this.state[type + 'Path']
-    const np = await this.parsePath(type, this.state[nt])
+    let np = await this.parsePath(type, this.state[nt])
+    if (type === typeMap.remote) {
+      np = normalizeRemotePath(np)
+    }
     if (!isValidPath(np)) {
       return notification.warning({
         message: 'path not valid'
@@ -1003,6 +1033,7 @@ export default class Sftp extends Component {
     }
     this.setState({
       [n]: np,
+      [nt]: np,
       [`${type}Keyword`]: ''
     }, () => this[`${type}List`](undefined, undefined, oldPath))
   }
@@ -1010,7 +1041,10 @@ export default class Sftp extends Component {
   goParent = (type) => {
     const n = `${type}Path`
     const p = this.state[n]
-    const np = resolve(p, '..')
+    let np = resolve(p, '..')
+    if (type === typeMap.remote) {
+      np = normalizeRemotePath(np)
+    }
     const op = this.state[n]
     if (np !== p) {
       this.setState({
@@ -1218,6 +1252,7 @@ export default class Sftp extends Component {
     const addrProps = {
       host,
       type,
+      handleUploadFromBrowser: this.handleUploadFromBrowser,
       ...pick(
         this,
         [

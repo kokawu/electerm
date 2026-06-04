@@ -117,6 +117,9 @@ exports.terminal = async function (initOptions, ws, uid) {
     })
   }
   child.on('exit', () => {
+    // Remove all pending message listeners to prevent memory leaks
+    // if the child exits before responding to sendMsgToChildProcess calls
+    child.removeAllListeners('message')
     activeTerminals.delete(pid)
   })
   if (type !== 'ftp') {
@@ -130,6 +133,14 @@ exports.terminal = async function (initOptions, ws, uid) {
       child.kill()
       throw err
     }
+  }
+
+  // Kill any existing child process for this pid before overwriting.
+  // This can happen on reconnects where a new process is spawned for the same tab id.
+  const existingEntry = activeTerminals.get(pid)
+  if (existingEntry) {
+    existingEntry.child.kill()
+    activeTerminals.delete(pid)
   }
 
   // Store the terminal process in the map
@@ -149,6 +160,27 @@ exports.testConnection = async function (initOptions, ws, uid) {
   const type = initOptions.termType || initOptions.type || 'terminal'
   const port = await getPort()
   const child = await runSessionServer(type, port)
+
+  const isSsh = ![
+    'telnet',
+    'serial',
+    'local',
+    'rdp',
+    'vnc',
+    'spice',
+    'ftp'
+  ].includes(type)
+  if (isSsh && ws) {
+    child.on('message', (m) => {
+      const { type: msgType, data } = m
+      if (msgType === 'common') {
+        ws.s(data)
+        ws.once((respData) => {
+          child.send(respData)
+        }, data.id)
+      }
+    })
+  }
 
   const res = await sendMsgToChildProcess(child, {
     id: uid,
@@ -205,6 +237,13 @@ exports.terminals = function (pid) {
         id,
         action: 'set-terminal-log-path',
         body: { pid, logPath }
+      })
+    },
+    startTerminalLogFile: (id, logFilePath, addTimeStampToTermLog) => {
+      sendMsgToChildProcess(pid, {
+        id,
+        action: 'start-terminal-log-file',
+        body: { pid, logFilePath, addTimeStampToTermLog }
       })
     }
   }

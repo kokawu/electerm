@@ -41,10 +41,23 @@ const widgetInfo = {
       description: 'The port number to listen on'
     },
     {
+      name: 'apiKey',
+      type: 'string',
+      default: '',
+      showGenerator: true,
+      description: 'Optional API key for authenticating MCP requests. If set, clients must send this in the Authorization header as: Bearer <apiKey>. Leave empty to skip authentication.'
+    },
+    {
       name: 'enableBookmarks',
       type: 'boolean',
       default: true,
       description: 'Enable bookmark APIs (list, get, add, edit, delete)'
+    },
+    {
+      name: 'bookmarkKeyword',
+      type: 'string',
+      default: '',
+      description: 'Filter keyword for bookmark list API. Only bookmarks with titles containing this keyword (case-insensitive) will be returned. Leave empty to return all bookmarks.'
     },
     {
       name: 'enableBookmarkGroups',
@@ -70,6 +83,18 @@ const widgetInfo = {
       type: 'boolean',
       default: false,
       description: 'Automatically start this MCP server when the app launches'
+    },
+    {
+      name: 'commandBlacklist',
+      type: 'textarea',
+      default: '',
+      description: 'Newline-separated list of regex patterns. Commands matching any pattern are rejected. Built-in dangerous patterns are always active.'
+    },
+    {
+      name: 'commandWhitelist',
+      type: 'textarea',
+      default: '',
+      description: 'Newline-separated list of regex patterns. When non-empty, only commands matching at least one pattern are allowed (whitelist mode).'
     }
   ]
 }
@@ -84,12 +109,81 @@ function getDefaultConfig () {
 class ElectermMCPServer {
   constructor (config) {
     this.config = config
+    // API key is optional - skip auth if not provided
     this.instanceId = uid()
     this.httpServer = null
     this.mcpServer = null
     this.ipcHandler = null
     this.pendingRequests = new Map()
     this.transports = {}
+  }
+
+  // Built-in blacklist: patterns that are always blocked regardless of user config.
+  // These cover the most common destructive / privilege-escalation shell idioms.
+  static get BUILTIN_BLACKLIST () {
+    return [
+      /rm\s+-[^\s]*[rR][^\s]*\s+\//, // rm -rf / or rm -Rf / (recursive delete from root)
+      /rm\s+-[^\s]*[rR][^\s]*\s+~/, // rm -rf ~ or rm -Rf ~ (recursive delete home)
+      /rm\s+--recursive/, // rm --recursive (long-form flag)
+      /:\s*\(\s*\)\s*\{.*\|.*:.*&.*\}\s*;.*:/, // fork bomb  :(){:|:&};:
+      /\bdd\b.*\bof\s*=\s*\/dev\//, // dd of=/dev/...
+      /\bmkfs\b/, // mkfs (format filesystem)
+      />\s*\/dev\/[sh]d[a-z]/, // redirect to raw disk
+      /\bsudo\s+rm\b/, // sudo rm
+      /curl\s+.*\|\s*sh/, // curl | sh  (remote code execution)
+      /wget\s+.*\|\s*sh/, // wget | sh
+      /curl\s+.*\|\s*bash/, // curl | bash
+      /wget\s+.*\|\s*bash/ // wget | bash
+    ]
+  }
+
+  // Validate a command against whitelist/blacklist rules.
+  // Returns { allowed: true } or { allowed: false, reason: string }
+  validateCommand (command) {
+    // 1. Always-on built-in blacklist
+    for (const pattern of ElectermMCPServer.BUILTIN_BLACKLIST) {
+      if (pattern.test(command)) {
+        return { allowed: false, reason: `Command blocked by built-in safety rule: ${pattern}` }
+      }
+    }
+
+    // 2. User-defined blacklist (newline-separated regex strings)
+    const userBlacklist = (this.config.commandBlacklist || '')
+      .split('\n')
+      .map(s => s.trim())
+      .filter(Boolean)
+
+    for (const raw of userBlacklist) {
+      try {
+        if (new RegExp(raw).test(command)) {
+          return { allowed: false, reason: `Command blocked by blacklist pattern: ${raw}` }
+        }
+      } catch (_) {
+        // ignore invalid regex in config
+      }
+    }
+
+    // 3. User-defined whitelist (newline-separated regex strings)
+    //    Only enforced when at least one pattern is configured.
+    const userWhitelist = (this.config.commandWhitelist || '')
+      .split('\n')
+      .map(s => s.trim())
+      .filter(Boolean)
+
+    if (userWhitelist.length > 0) {
+      const allowed = userWhitelist.some(raw => {
+        try {
+          return new RegExp(raw).test(command)
+        } catch (_) {
+          return false
+        }
+      })
+      if (!allowed) {
+        return { allowed: false, reason: 'Command not in whitelist' }
+      }
+    }
+
+    return { allowed: true }
   }
 
   // Send request to renderer process via IPC
@@ -231,6 +325,10 @@ class ElectermMCPServer {
         }
       },
       async ({ command, tabId, inputOnly }) => {
+        const check = self.validateCommand(command)
+        if (!check.allowed) {
+          return { content: [{ type: 'text', text: JSON.stringify({ error: check.reason }, null, 2) }], isError: true }
+        }
         const result = await self.sendToRenderer('tool-call', {
           toolName: 'send_terminal_command',
           args: { command, tabId, inputOnly }
@@ -298,6 +396,168 @@ class ElectermMCPServer {
       }
     )
 
+    server.registerTool(
+      'get_electerm_terminal_status',
+      {
+        description: 'Get the current status of a terminal tab. Returns whether it is actively receiving data (running), idle (no data for 4+ seconds), or has a password prompt. Also returns the last 20 lines of terminal output. This is a lightweight, non-blocking check ideal for monitoring long-running commands.',
+        inputSchema: {
+          tabId: z.string().optional().describe('Tab ID to check (default: active tab)')
+        }
+      },
+      async (args) => {
+        const result = await self.sendToRenderer('tool-call', {
+          toolName: 'get_terminal_status', args
+        })
+        return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] }
+      }
+    )
+
+    server.registerTool(
+      'cancel_electerm_terminal_command',
+      {
+        description: 'Cancel the currently running command in a terminal by sending Ctrl+C. Use this to interrupt a long-running or stuck command.',
+        inputSchema: {
+          tabId: z.string().optional().describe('Tab ID to cancel command in (default: active tab)')
+        }
+      },
+      async (args) => {
+        const result = await self.sendToRenderer('tool-call', {
+          toolName: 'cancel_terminal_command', args
+        })
+        return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] }
+      }
+    )
+
+    // ==================== Background Task APIs ====================
+
+    server.registerTool(
+      'run_electerm_background_command',
+      {
+        description: 'Run a command in the background using nohup. The command runs independently of the terminal session — the terminal is freed immediately. Returns a taskId for monitoring. Use get_electerm_background_task_status and get_electerm_background_task_log to check progress. Works best with SSH sessions where monitoring uses a separate exec channel.',
+        inputSchema: {
+          command: z.string().describe('The shell command to run in the background'),
+          tabId: z.string().optional().describe('Tab ID to run on (default: active tab)')
+        }
+      },
+      async (args) => {
+        const result = await self.sendToRenderer('tool-call', {
+          toolName: 'run_background_command', args
+        })
+        return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] }
+      }
+    )
+
+    server.registerTool(
+      'get_electerm_background_task_status',
+      {
+        description: 'Check the status of a background task. Returns whether it is still running, has completed (with exit code), or is unknown. For SSH sessions, this uses a separate exec channel and does not interfere with the terminal.',
+        inputSchema: {
+          taskId: z.string().describe('Task ID returned by run_electerm_background_command')
+        }
+      },
+      async (args) => {
+        const result = await self.sendToRenderer('tool-call', {
+          toolName: 'get_background_task_status', args
+        })
+        return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] }
+      }
+    )
+
+    server.registerTool(
+      'get_electerm_background_task_log',
+      {
+        description: 'Read the output log of a background task. Returns the last N lines of output. Useful for monitoring progress of long-running commands like builds, deployments, or installations.',
+        inputSchema: {
+          taskId: z.string().describe('Task ID returned by run_electerm_background_command'),
+          lines: z.number().optional().describe('Number of recent log lines to return (default: 100)')
+        }
+      },
+      async (args) => {
+        const result = await self.sendToRenderer('tool-call', {
+          toolName: 'get_background_task_log', args
+        })
+        return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] }
+      }
+    )
+
+    server.registerTool(
+      'cancel_electerm_background_task',
+      {
+        description: 'Cancel a running background task by killing its process. The task status will be set to cancelled.',
+        inputSchema: {
+          taskId: z.string().describe('Task ID returned by run_electerm_background_command')
+        }
+      },
+      async (args) => {
+        const result = await self.sendToRenderer('tool-call', {
+          toolName: 'cancel_background_task', args
+        })
+        return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] }
+      }
+    )
+
+    // ==================== Direct Tab Open APIs (always enabled) ====================
+
+    server.registerTool(
+      'open_electerm_tab_ssh',
+      {
+        description: 'Open a new SSH terminal tab directly with connection parameters (no bookmark created)',
+        inputSchema: sshBookmarkSchema
+      },
+      async (args) => {
+        const result = await self.sendToRenderer('tool-call', {
+          toolName: 'open_tab',
+          args: { ...args, type: 'ssh' }
+        })
+        return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] }
+      }
+    )
+
+    server.registerTool(
+      'open_electerm_tab_telnet',
+      {
+        description: 'Open a new Telnet terminal tab directly with connection parameters (no bookmark created)',
+        inputSchema: telnetBookmarkSchema
+      },
+      async (args) => {
+        const result = await self.sendToRenderer('tool-call', {
+          toolName: 'open_tab',
+          args: { ...args, type: 'telnet' }
+        })
+        return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] }
+      }
+    )
+
+    server.registerTool(
+      'open_electerm_tab_serial',
+      {
+        description: 'Open a new Serial terminal tab directly with connection parameters (no bookmark created)',
+        inputSchema: serialBookmarkSchema
+      },
+      async (args) => {
+        const result = await self.sendToRenderer('tool-call', {
+          toolName: 'open_tab',
+          args: { ...args, type: 'serial' }
+        })
+        return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] }
+      }
+    )
+
+    server.registerTool(
+      'open_electerm_tab_local',
+      {
+        description: 'Open a new Local terminal tab directly with connection parameters (no bookmark created)',
+        inputSchema: localBookmarkSchema
+      },
+      async (args) => {
+        const result = await self.sendToRenderer('tool-call', {
+          toolName: 'open_tab',
+          args: { ...args, type: 'local' }
+        })
+        return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] }
+      }
+    )
+
     // ==================== Bookmark APIs ====================
     if (this.config.enableBookmarks) {
       server.registerTool(
@@ -307,7 +567,12 @@ class ElectermMCPServer {
           inputSchema: {}
         },
         async (args) => {
-          const result = await self.sendToRenderer('tool-call', { toolName: 'list_bookmarks', args: {} })
+          let result = await self.sendToRenderer('tool-call', { toolName: 'list_bookmarks', args: {} })
+          const keyword = self.config.bookmarkKeyword
+          if (keyword && Array.isArray(result)) {
+            const lower = keyword.toLowerCase()
+            result = result.filter(b => (b.title || '').toLowerCase().includes(lower))
+          }
           return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] }
         }
       )
@@ -663,17 +928,42 @@ class ElectermMCPServer {
     const app = express()
     app.use(express.json())
 
-    // Handle CORS
+    // Handle CORS — restrict to same-origin only (no wildcard)
     app.use((req, res, next) => {
-      res.setHeader('Access-Control-Allow-Origin', '*')
+      const allowedOrigin = this.config.allowedOrigin || ''
+      if (allowedOrigin) {
+        res.setHeader('Access-Control-Allow-Origin', allowedOrigin)
+      }
+      // Do NOT set Access-Control-Allow-Origin when no origin is configured
+      // This blocks cross-origin browser requests by default
       res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS')
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, mcp-session-id')
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, mcp-session-id, Authorization')
       if (req.method === 'OPTIONS') {
         res.status(204).end()
         return
       }
       next()
     })
+
+    // Authenticate requests with API key (only if apiKey is configured)
+    if (this.config.apiKey) {
+      app.use((req, res, next) => {
+        const authHeader = req.headers.authorization || ''
+        const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : ''
+        if (!token || token !== this.config.apiKey) {
+          res.status(401).json({
+            jsonrpc: '2.0',
+            error: {
+              code: -32600,
+              message: 'Unauthorized: invalid or missing API key'
+            },
+            id: null
+          })
+          return
+        }
+        next()
+      })
+    }
 
     const self = this
 
@@ -754,9 +1044,10 @@ class ElectermMCPServer {
         const serverInfo = {
           url: `http://${host}:${port}/mcp`,
           protocol: 'mcp',
-          version: '2024-11-05'
+          version: '2024-11-05',
+          apiKey: self.config.apiKey
         }
-        const msg = `MCP Server is running at ${serverInfo.url}`
+        const msg = `MCP Server is running at ${serverInfo.url} (API key required)`
         resolve({
           serverInfo,
           msg,
@@ -834,5 +1125,6 @@ function widgetRun (instanceConfig) {
 
 module.exports = {
   widgetInfo,
-  widgetRun
+  widgetRun,
+  _ElectermMCPServer: ElectermMCPServer
 }
