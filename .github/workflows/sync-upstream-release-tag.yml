@@ -3,16 +3,19 @@ name: Sync Upstream Release Tag
 on:
   schedule:
     - cron: '23 3 * * *'
+  workflow_run:
+    workflows: [Auto Sync Upstream Master]
+    types: [completed]
   workflow_dispatch:
     inputs:
       tag:
-        description: Specific upstream tag to sync, for example v2.16.9
+        description: Specific upstream tag to release, for example v3.15.159
         required: false
         type: string
 
 permissions:
+  actions: write
   contents: write
-  pull-requests: write
 
 concurrency:
   group: sync-upstream-release-tag
@@ -20,6 +23,7 @@ concurrency:
 
 jobs:
   sync:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
 
     steps:
@@ -39,7 +43,7 @@ jobs:
           git remote add upstream https://github.com/electerm/electerm.git
           git fetch origin master --no-tags --force
           git fetch upstream master --no-tags --force
-          git fetch upstream --no-tags '+refs/tags/*:refs/tags/upstream/*' --force
+          git fetch upstream --no-tags --prune '+refs/tags/*:refs/tags/upstream/*' --force
 
       - name: Resolve target upstream tag
         id: target
@@ -51,7 +55,7 @@ jobs:
           else
             TARGET_TAG="$(
               git for-each-ref refs/tags/upstream --format='%(refname:strip=3)' |
-              grep -E '^v[0-9]+' |
+              grep -E '^v[0-9]+(\.[0-9]+)+$' |
               sort -V |
               tail -n 1
             )"
@@ -63,124 +67,87 @@ jobs:
           fi
 
           TARGET_REF="refs/tags/upstream/$TARGET_TAG"
-
-          if ! git rev-parse "$TARGET_REF^{commit}" >/dev/null 2>&1; then
+          if ! TARGET_SHA="$(git rev-parse "$TARGET_REF^{commit}" 2>/dev/null)"; then
             echo "Unknown upstream tag: $TARGET_TAG" >&2
             exit 1
           fi
 
-          TARGET_SHA="$(git rev-list -n 1 "$TARGET_REF")"
-
+          FORK_TAG="${TARGET_TAG}-kokawu.1"
           {
             echo "tag=$TARGET_TAG"
-            echo "ref=$TARGET_REF"
             echo "sha=$TARGET_SHA"
+            echo "fork_tag=$FORK_TAG"
           } >> "$GITHUB_OUTPUT"
 
           {
-            echo "### Sync Target"
+            echo "### Release Target"
             echo ""
-            echo "- Tag: \`$TARGET_TAG\`"
-            echo "- Commit: \`$TARGET_SHA\`"
+            echo "- Upstream tag: \`$TARGET_TAG\`"
+            echo "- Upstream commit: \`$TARGET_SHA\`"
+            echo "- Fork tag: \`$FORK_TAG\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Check whether master already contains the tag
-        id: status
+      - name: Verify master contains the upstream release
         run: |
           if git merge-base --is-ancestor "${{ steps.target.outputs.sha }}" origin/master; then
-            echo "needs_sync=false" >> "$GITHUB_OUTPUT"
-            echo "master already contains ${{ steps.target.outputs.tag }}"
-            {
-              echo ""
-              echo "No sync needed. \`origin/master\` already contains \`${{ steps.target.outputs.tag }}\`."
-            } >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "needs_sync=true" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
 
-      - name: Prepare sync branch
-        if: steps.status.outputs.needs_sync == 'true'
-        run: git checkout -B auto/sync-upstream-tag origin/master
-
-      - name: Merge upstream tag into sync branch
-        id: merge
-        if: steps.status.outputs.needs_sync == 'true'
-        run: |
-          if git merge --no-ff --no-edit "${{ steps.target.outputs.sha }}"; then
-            echo "clean=true" >> "$GITHUB_OUTPUT"
-            {
-              echo ""
-              echo "Merge completed without conflicts."
-            } >> "$GITHUB_STEP_SUMMARY"
-          else
-            git merge --abort || true
-            echo "clean=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Stop on merge conflict
-        if: steps.status.outputs.needs_sync == 'true' && steps.merge.outputs.clean != 'true'
-        run: |
           {
             echo ""
-            echo "Sync stopped because \`${{ steps.target.outputs.tag }}\` conflicts with \`master\`."
-            echo "No branch or pull request was updated."
+            echo "Cannot create the release because \`master\` does not contain \`${{ steps.target.outputs.tag }}\`."
+            echo "The next successful upstream master sync will retry automatically."
           } >> "$GITHUB_STEP_SUMMARY"
           exit 1
 
-      - name: Push sync branch
-        if: steps.status.outputs.needs_sync == 'true' && steps.merge.outputs.clean == 'true'
-        run: git push --force-with-lease origin auto/sync-upstream-tag
-
-      - name: Create or update pull request
-        if: steps.status.outputs.needs_sync == 'true' && steps.merge.outputs.clean == 'true'
-        uses: actions/github-script@v7
+      - name: Create fork release tag
+        id: fork_tag
         env:
+          FORK_TAG: ${{ steps.target.outputs.fork_tag }}
           TARGET_TAG: ${{ steps.target.outputs.tag }}
-          TARGET_SHA: ${{ steps.target.outputs.sha }}
-        with:
-          script: |
-            const owner = context.repo.owner
-            const repo = context.repo.repo
-            const headBranch = 'auto/sync-upstream-tag'
-            const head = `${owner}:${headBranch}`
-            const base = 'master'
-            const title = `chore: sync upstream ${process.env.TARGET_TAG}`
-            const body = [
-              `Syncs upstream release tag \`${process.env.TARGET_TAG}\` into \`${base}\`.`,
-              '',
-              `- Upstream commit: \`${process.env.TARGET_SHA}\``,
-              `- Triggered by: \`${context.eventName}\``,
-              '',
-              'This pull request was created automatically after a conflict-free merge test.'
-            ].join('\n')
+        run: |
+          if git ls-remote --exit-code --tags origin "refs/tags/$FORK_TAG" >/dev/null 2>&1; then
+            echo "created=false" >> "$GITHUB_OUTPUT"
+            echo "Fork tag already exists: $FORK_TAG"
+            exit 0
+          fi
 
-            const { data: pulls } = await github.rest.pulls.list({
-              owner,
-              repo,
-              state: 'open',
-              head,
-              base
-            })
+          git checkout --detach origin/master
+          git tag -a "$FORK_TAG" -m "electerm $TARGET_TAG with OSC52"
+          git push origin "refs/tags/$FORK_TAG"
+          echo "created=true" >> "$GITHUB_OUTPUT"
 
-            if (pulls.length > 0) {
-              await github.rest.pulls.update({
-                owner,
-                repo,
-                pull_number: pulls[0].number,
-                title,
-                body
-              })
-              core.info(`Updated PR #${pulls[0].number}`)
-              return
-            }
+      - name: Check for an existing GitHub Release
+        id: release
+        env:
+          FORK_TAG: ${{ steps.target.outputs.fork_tag }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$FORK_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
 
-            const { data: pull } = await github.rest.pulls.create({
-              owner,
-              repo,
-              title,
-              head: headBranch,
-              base,
-              body
-            })
+      - name: Build OSC52 package and create Release
+        if: steps.release.outputs.exists != 'true'
+        env:
+          FORK_TAG: ${{ steps.target.outputs.fork_tag }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run build-win-osc52.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref "$FORK_TAG"
 
-            core.info(`Created PR #${pull.number}`)
+          {
+            echo ""
+            echo "Created \`$FORK_TAG\` and dispatched the OSC52 Windows release build."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Report existing Release
+        if: steps.release.outputs.exists == 'true'
+        run: |
+          {
+            echo ""
+            echo "Release \`${{ steps.target.outputs.fork_tag }}\` already exists. No build was dispatched."
+          } >> "$GITHUB_STEP_SUMMARY"
