@@ -1,4 +1,4 @@
-name: Sync Upstream Release Tag
+name: Release Latest OSC52 Build
 
 on:
   schedule:
@@ -7,11 +7,6 @@ on:
     workflows: [Auto Sync Upstream Master]
     types: [completed]
   workflow_dispatch:
-    inputs:
-      tag:
-        description: Specific upstream tag to release, for example v3.15.159
-        required: false
-        type: string
 
 permissions:
   actions: write
@@ -37,74 +32,44 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-      - name: Fetch origin and upstream refs
+      - name: Fetch origin master
         run: |
-          git remote remove upstream 2>/dev/null || true
-          git remote add upstream https://github.com/electerm/electerm.git
           git fetch origin master --no-tags --force
-          git fetch upstream master --no-tags --force
-          git fetch upstream --no-tags --prune '+refs/tags/*:refs/tags/upstream/*' --force
 
-      - name: Resolve target upstream tag
+      - name: Resolve release version
         id: target
-        env:
-          REQUESTED_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || '' }}
         run: |
-          if [ -n "$REQUESTED_TAG" ]; then
-            TARGET_TAG="$REQUESTED_TAG"
-          else
-            TARGET_TAG="$(
-              git for-each-ref refs/tags/upstream --format='%(refname:strip=3)' |
-              grep -E '^v[0-9]+(\.[0-9]+)+$' |
-              sort -V |
-              tail -n 1
-            )"
-          fi
+          APP_VERSION="$(
+            git show origin/master:package.json |
+            node -p "JSON.parse(require('fs').readFileSync(0, 'utf8')).version"
+          )"
 
-          if [ -z "$TARGET_TAG" ]; then
-            echo "No upstream release tag found" >&2
+          if ! [[ "$APP_VERSION" =~ ^[0-9]+(\.[0-9]+)+$ ]]; then
+            echo "Invalid package version: $APP_VERSION" >&2
             exit 1
           fi
 
-          TARGET_REF="refs/tags/upstream/$TARGET_TAG"
-          if ! TARGET_SHA="$(git rev-parse "$TARGET_REF^{commit}" 2>/dev/null)"; then
-            echo "Unknown upstream tag: $TARGET_TAG" >&2
-            exit 1
-          fi
-
-          FORK_TAG="${TARGET_TAG}-kokawu.1"
+          MASTER_SHA="$(git rev-parse origin/master)"
+          FORK_TAG="v${APP_VERSION}-kokawu.1"
           {
-            echo "tag=$TARGET_TAG"
-            echo "sha=$TARGET_SHA"
+            echo "version=$APP_VERSION"
+            echo "sha=$MASTER_SHA"
             echo "fork_tag=$FORK_TAG"
           } >> "$GITHUB_OUTPUT"
 
           {
             echo "### Release Target"
             echo ""
-            echo "- Upstream tag: \`$TARGET_TAG\`"
-            echo "- Upstream commit: \`$TARGET_SHA\`"
-            echo "- Fork tag: \`$FORK_TAG\`"
+            echo "- Application version: \`$APP_VERSION\`"
+            echo "- Master commit: \`$MASTER_SHA\`"
+            echo "- Release tag: \`$FORK_TAG\`"
           } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Verify master contains the upstream release
-        run: |
-          if git merge-base --is-ancestor "${{ steps.target.outputs.sha }}" origin/master; then
-            exit 0
-          fi
-
-          {
-            echo ""
-            echo "Cannot create the release because \`master\` does not contain \`${{ steps.target.outputs.tag }}\`."
-            echo "The next successful upstream master sync will retry automatically."
-          } >> "$GITHUB_STEP_SUMMARY"
-          exit 1
 
       - name: Create fork release tag
         id: fork_tag
         env:
           FORK_TAG: ${{ steps.target.outputs.fork_tag }}
-          TARGET_TAG: ${{ steps.target.outputs.tag }}
+          APP_VERSION: ${{ steps.target.outputs.version }}
         run: |
           if git ls-remote --exit-code --tags origin "refs/tags/$FORK_TAG" >/dev/null 2>&1; then
             echo "created=false" >> "$GITHUB_OUTPUT"
@@ -113,7 +78,7 @@ jobs:
           fi
 
           git checkout --detach origin/master
-          git tag -a "$FORK_TAG" -m "electerm $TARGET_TAG with OSC52"
+          git tag -a "$FORK_TAG" -m "electerm $APP_VERSION with OSC52"
           git push origin "refs/tags/$FORK_TAG"
           echo "created=true" >> "$GITHUB_OUTPUT"
 
