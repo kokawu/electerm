@@ -4,16 +4,17 @@ import {
   HighlightOutlined,
   HomeOutlined,
   UserOutlined,
-  WarningOutlined,
   InfoCircleOutlined,
   AlignLeftOutlined,
   BugOutlined,
-  HeartOutlined
+  HeartOutlined,
+  CloudOutlined
 } from '@ant-design/icons'
 import { Tabs, Button } from 'antd'
 import Modal from '../common/modal'
 import Link from '../common/external-link'
 import LogoElem from '../common/logo-elem'
+import Placeholder from '../common/placeholder'
 import RunningTime from './app-running-time'
 import { auto } from 'manate/react'
 import { useState } from 'react'
@@ -38,7 +39,7 @@ export default auto(function InfoModal (props) {
   }
 
   const renderCheckUpdate = () => {
-    if (window.et.isWebApp || checkSkipSrc(props.installSrc)) {
+    if (window.et.disableUpgradeCheck || checkSkipSrc(props.installSrc)) {
       return null
     }
     const {
@@ -136,10 +137,10 @@ export default auto(function InfoModal (props) {
       url: bugReportLink
     },
     releases: releaseLink,
-    privacyNoticeLink,
     sponsorLink,
     knownIssuesLink
   } = packInfo
+  const electermOnline = 'https://cloud.electerm.org'
   const link = releaseLink.replace('/releases', '')
   const { versions } = window.pre
   const deps = {
@@ -215,9 +216,9 @@ export default auto(function InfoModal (props) {
             </Link>
           </p>
           <p className='mg1b'>
-            <WarningOutlined /> <b className='mg1r'>{e('privacyNotice')} ➾</b>
-            <Link to={privacyNoticeLink} className='mg1l'>
-              {privacyNoticeLink}
+            <CloudOutlined /> <b className='mg1r'>electerm Online ➾</b>
+            <Link to={electermOnline} className='mg1l'>
+              {electermOnline}
             </Link>
           </p>
           <p className='mg1b'>
@@ -230,6 +231,7 @@ export default auto(function InfoModal (props) {
             <InfoCircleOutlined /> <b className='mg1r'>{window.store.installSrc}</b>
           </p>
           {renderCheckUpdate()}
+          <Placeholder />
         </>
       )
     },

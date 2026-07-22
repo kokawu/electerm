@@ -11,7 +11,6 @@ import { update } from 'lodash-es'
 import { mode2permission, permission2mode } from '../../common/mode2permission'
 import renderPermission from './permission-render'
 import FileIcon from './file-icon'
-import fs from '../../common/fs'
 import { filesize } from 'filesize'
 import { runCmd } from '../terminal/terminal-apis'
 import {
@@ -124,6 +123,13 @@ export default class FileMode extends React.PureComponent {
     return String(value).replace(/'/g, "''")
   }
 
+  escapePosixShellArg = (value) => {
+    // Within single quotes, the only special character is the single quote itself.
+    // Escape it by closing the quote, inserting an escaped quote, and reopening:
+    //   '  ->  '\''
+    return String(value).replace(/'/g, "'\\''")
+  }
+
   normalizeRemoteWindowsPath = (value) => {
     return String(value).replace(/^\/([a-zA-Z]:)/, '$1')
   }
@@ -162,11 +168,14 @@ export default class FileMode extends React.PureComponent {
   }
 
   calcLocal = async (folder) => {
+    const safeFolder = isWin
+      ? this.escapePowerShellPath(folder)
+      : this.escapePosixShellArg(folder)
     const cmd = isWin
-      ? `Get-ChildItem -Recurse '${folder}' | Measure-Object -Property Length -Sum`
-      : `du -sh '${folder}'`
+      ? `Get-ChildItem -Recurse '${safeFolder}' | Measure-Object -Property Length -Sum`
+      : `du -sh '${safeFolder}'`
     const func = isWin ? 'runWinCmd' : 'run'
-    const res = await fs[func](cmd).catch(window.store.onError)
+    const res = await window.fs[func](cmd).catch(window.store.onError)
     return this.getSize(res)
   }
 
@@ -175,7 +184,8 @@ export default class FileMode extends React.PureComponent {
     if (platform === 'windows') {
       return this.calcRemoteWin(folder)
     }
-    const cmd = `du -sh '${folder}'`
+    const safeFolder = this.escapePosixShellArg(folder)
+    const cmd = `du -sh '${safeFolder}'`
     const r = await runCmd(
       this.state.pid,
       cmd

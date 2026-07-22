@@ -67,7 +67,7 @@ export default function renderQm (form) {
     return (
       <Space.Compact
         align='center'
-        className='width-100 mg2b'
+        className='width-100 mg2b qm-cmd-row'
         key={field.key}
         draggable
         onDragStart={(e) => handleDragStart(e, i)}
@@ -78,6 +78,18 @@ export default function renderQm (form) {
       >
         <HolderOutlined className='mg1r drag' />
 
+        <FormItem
+          label=''
+          name={[field.name, 'name']}
+          noStyle
+          rules={[{ max: 100, message: '60 chars max' }]}
+        >
+          <Input
+            placeholder={e('name')}
+            className='compact-input qm-name-input'
+            maxLength={100}
+          />
+        </FormItem>
         <Space.Addon>{e('delay')}</Space.Addon>
         <FormItem
           label=''

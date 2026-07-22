@@ -20,7 +20,8 @@ class Transfer {
     conn,
     sftpId,
     isDirectory = false,
-    ws
+    ws,
+    encode = 'utf8'
   }) {
     this.id = id
     const isd = type === 'download'
@@ -38,6 +39,7 @@ class Transfer {
     this.concurrency = options.concurrency || 64
     this.chunkSize = options.chunkSize || 32768
     this.mode = options.mode
+    this.encode = encode
     this.onData = _.throttle((data) => {
       ws.s({
         id: 'transfer:data:' + id,
@@ -76,7 +78,7 @@ class Transfer {
     try {
       const remotePath = type === 'download' ? this.srcPath : this.dstPath
       const localPath = type === 'download' ? this.dstPath : this.srcPath
-      this.scpTransfer = new FolderTransfer(this.conn, tar, {
+      const folderOpts = {
         type,
         remotePath,
         localPath,
@@ -87,7 +89,12 @@ class Transfer {
             total
           })
         }
-      })
+      }
+      if (this.encode !== 'utf8') {
+        folderOpts.iconv = require('iconv-lite')
+        folderOpts.encoding = this.encode
+      }
+      this.scpTransfer = new FolderTransfer(this.conn, tar, folderOpts)
       await this.scpTransfer.startTransfer()
       const state = this.scpTransfer.getState
         ? this.scpTransfer.getState()
@@ -207,32 +214,41 @@ class Transfer {
       hadError = true
       const canCloseSrc = th.srcHandle && (src === fs || (src.outgoing && src.outgoing.state === 'open'))
       const canCloseDst = th.dstHandle && (dst === fs || (dst.outgoing && dst.outgoing.state === 'open'))
-      let left = 0
-      if (canCloseSrc) ++left
-      if (canCloseDst) ++left
-      const finish = () => {
-        if (--left === 0) {
+
+      const closeHandles = () => {
+        let left = 0
+        if (canCloseSrc) ++left
+        if (canCloseDst) ++left
+        const finish = () => {
+          if (--left === 0) {
+            if (err) th.onError(err)
+            else th.onEnd()
+          }
+        }
+        if (left === 0) {
           if (err) th.onError(err)
           else th.onEnd()
+          return
+        }
+        if (canCloseSrc) {
+          src.close(th.srcHandle, () => {
+            th.srcHandle = undefined
+            finish()
+          })
+        }
+        if (canCloseDst) {
+          dst.close(th.dstHandle, () => {
+            th.dstHandle = undefined
+            finish()
+          })
         }
       }
-      if (left === 0) {
-        if (err) th.onError(err)
-        else th.onEnd()
-        return
-      }
-      if (canCloseSrc) {
-        src.close(th.srcHandle, () => {
-          th.srcHandle = undefined
-          finish()
-        })
-      }
-      if (canCloseDst) {
-        dst.close(th.dstHandle, () => {
-          th.dstHandle = undefined
-          finish()
-        })
-      }
+
+      // Do not preserve source file mtime on destination after transfer.
+      // The uploaded/downloaded file should have the transfer time as both
+      // create time and modify time, which is the common practice for
+      // SFTP/FTP clients (e.g. OpenSSH sftp, FileZilla).
+      closeHandles()
     }
 
     if (fsize <= 0) {

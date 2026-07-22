@@ -13,8 +13,14 @@ import {
 } from '@ant-design/icons'
 import IconHolder from '../sys-menu/icon-holder'
 import { filesRef } from '../common/ref'
+import findParent from '../../common/find-parent'
+import { removeClass } from '../../common/class'
 
 const e = window.translate
+const fileItemCls = 'sftp-item'
+const onDragCls = 'sftp-ondrag'
+const onDragOverCls = 'sftp-dragover'
+const onMultiDragCls = 'sftp-dragover-multi'
 
 export default class FileListTable extends Component {
   constructor (props) {
@@ -26,6 +32,67 @@ export default class FileListTable extends Component {
   }
 
   containerRef = createRef()
+
+  onDragOver = e => {
+    e.preventDefault()
+  }
+
+  onDragEnter = e => {
+    let { target } = e
+    target = findParent(target, '.' + fileItemCls)
+    if (!target) {
+      return e.preventDefault()
+    }
+    if (this.dropTarget && this.dropTarget !== target) {
+      this.dropTarget.classList.remove(onDragOverCls)
+    }
+    this.dropTarget = target
+    target.classList.add(onDragOverCls)
+  }
+
+  onDragLeave = e => {
+    let { target } = e
+    target = findParent(target, '.' + fileItemCls)
+    if (!target) {
+      return e.preventDefault()
+    }
+    if (
+      this.containerRef.current &&
+      !this.containerRef.current.contains(e.relatedTarget)
+    ) {
+      target.classList.remove(onDragOverCls)
+    }
+  }
+
+  onDrop = e => {
+    e.preventDefault()
+    let { target } = e
+    if (!target) {
+      return
+    }
+    target = findParent(target, '.' + fileItemCls)
+    if (!target) {
+      return
+    }
+    const id = target.getAttribute('data-id')
+    const ref = filesRef.get('file-' + id)
+    if (ref) {
+      ref.onDrop(e)
+    }
+  }
+
+  onDragEnd = e => {
+    this.props.modifier({
+      onDrag: false
+    })
+    document.querySelectorAll('.' + onDragCls).forEach((d) => {
+      removeClass(d, onDragCls, onMultiDragCls)
+    })
+    document.querySelectorAll('.' + onDragOverCls).forEach((d) => {
+      removeClass(d, onDragOverCls)
+    })
+    e && e.dataTransfer && e.dataTransfer.clearData()
+  }
 
   componentDidUpdate (prevProps) {
     const prevList = prevProps.fileList
@@ -70,6 +137,23 @@ export default class FileListTable extends Component {
     ]
   }
 
+  /**
+   * In mobile mode, only show the file name to save horizontal space.
+   * Returns the effective properties used for rendering both the
+   * table header and individual file items.
+   */
+  getRenderProperties = () => {
+    if (window.store.isMobile) {
+      return [{
+        id: 'name',
+        max: 98,
+        min: 2,
+        size: 100
+      }]
+    }
+    return this.state.properties
+  }
+
   getPropsAll = () => {
     return [
       'name',
@@ -112,7 +196,7 @@ export default class FileListTable extends Component {
       onContextMenu: this.onContextMenu,
       onClickName: this.onClickName,
       onResize: this.onResize,
-      properties: this.state.properties,
+      properties: this.getRenderProperties(),
       sortDirection: this.props.sortDirection,
       sortProp: this.props.sortProp,
       maxWidth: this.props.width
@@ -207,7 +291,7 @@ export default class FileListTable extends Component {
     const fileProps = {
       ...this.props.getFileProps(item, type),
       cls,
-      properties: this.state.properties,
+      properties: this.getRenderProperties(),
       setClickFileId: this.setClickFileId
     }
     return (
@@ -289,7 +373,12 @@ export default class FileListTable extends Component {
       draggable: false,
       onScroll: this.onScroll,
       onClick: this.handleClick,
-      onDoubleClick: this.handleDoubleClick
+      onDoubleClick: this.handleDoubleClick,
+      onDragOver: this.onDragOver,
+      onDragEnter: this.onDragEnter,
+      onDragLeave: this.onDragLeave,
+      onDrop: this.onDrop,
+      onDragEnd: this.onDragEnd
     }
     const cls = classnames('sftp-table relative')
     const ddProps = {

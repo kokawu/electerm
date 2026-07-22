@@ -5,7 +5,6 @@
 import { dbNames, getData, fetchInitData } from '../common/db'
 import parseInt10 from '../common/parse-int10'
 import { infoTabs, statusMap, defaultEnvLang } from '../common/constants'
-import fs from '../common/fs'
 import generate from '../common/id-with-stamp'
 import { refsStatic } from '../components/common/ref'
 import defaultSettings from '../common/default-setting'
@@ -107,7 +106,7 @@ export async function addTabFromCommandLine (store, opts) {
   }
   Object.assign(conf, update)
   if (options.privateKeyPath) {
-    conf.privateKey = await fs.readFile(options.privateKeyPath)
+    conf.privateKey = await window.fs.readFile(options.privateKeyPath)
   }
   console.debug('command line opts', conf)
   if (
@@ -115,12 +114,52 @@ export async function addTabFromCommandLine (store, opts) {
     conf.fromCmdLine
   ) {
     store.ipcOpenTab(conf)
-  } else if (
-    options.initFolder &&
-    !(store.config.onStartSessions || []).length &&
-    store.config.initDefaultTabOnStart
-  ) {
-    window.initFolder = options.initFolder
+  } else {
+    // getHost didn't find a match, try parseQuickConnect for shortcut formats
+    // that getHost doesn't support (e.g., user:password@host)
+    let parsedFallback = null
+    if (argv && argv.length) {
+      for (const arg of argv) {
+        if (/^-/.test(arg)) continue
+        const result = parseQuickConnect(arg)
+        if (result && result.host) {
+          parsedFallback = result
+          break
+        }
+      }
+    }
+    if (parsedFallback) {
+      // Apply command-line options on top of parsed result
+      if (options.password) parsedFallback.password = options.password
+      if (options.passphrase) parsedFallback.passphrase = options.passphrase
+      if (options.user) parsedFallback.username = options.user
+      if (options.port && parseInt10(options.port)) parsedFallback.port = parseInt10(options.port)
+      if (options.title) parsedFallback.title = options.title
+      if (options.setEnv) parsedFallback.setEnv = options.setEnv
+      if (options.sftpOnly) parsedFallback.enableSsh = false
+      if (options.initFolder) parsedFallback.startDirectoryLocal = options.initFolder
+      if (options.opts) {
+        const optsParsed = safeParse(options.opts)
+        if (optsParsed !== options.opts) {
+          Object.assign(parsedFallback, optsParsed)
+          parsedFallback.fromCmdLine = true
+        }
+      }
+      if (options.tp) {
+        parsedFallback.type = options.tp
+        parsedFallback.fromCmdLine = true
+      }
+      if (options.privateKeyPath) {
+        parsedFallback.privateKey = await window.fs.readFile(options.privateKeyPath)
+      }
+      store.ipcOpenTab(parsedFallback)
+    } else if (
+      options.initFolder &&
+      !(store.config.onStartSessions || []).length &&
+      store.config.initDefaultTabOnStart
+    ) {
+      window.initFolder = options.initFolder
+    }
   }
   if (options.batchOp) {
     refsStatic.get('batch-op-runner')?.runBatchOpFromFile(options.batchOp)
@@ -183,55 +222,62 @@ export default (Store) => {
   }
   Store.prototype.initData = async function () {
     const { store } = window
-    await store.initApp()
-    const ext = {}
-    const all = dbNames.map(async name => {
-      const data = await fetchInitData(name)
-      return {
-        name,
-        data
-      }
-    })
-    await Promise.all(all)
-      .then(arr => {
-        for (const { name, data } of arr) {
-          const dt = JSON.parse(data || '[]')
-          refsStatic.add('oldState-' + name, dt)
-          if (name === 'bookmarks') {
-            ext.bookmarksMap = new Map(
-              dt.map(d => [d.id, d])
-            )
-          }
-          ext[name] = dt
+    store.initLoadingData = true
+    try {
+      await store.initApp()
+      const ext = {}
+      const all = dbNames.map(async name => {
+        const data = await fetchInitData(name)
+        return {
+          name,
+          data
         }
       })
-    ext.lastDataUpdateTime = await getData('lastDataUpdateTime') || 0
-    Object.assign(store, ext)
-    store.loadFontList()
-    store.fetchItermThemes()
-    store.openInitSessions()
-    store.fetchSshConfigItems()
-    store.initCommandLine().catch(store.onError)
-    initWatch(store)
-    setTimeout(
-      () => {
-        store.fixProfiles()
-        store.fixBookmarkGroups()
-      },
-      1000
-    )
-    setTimeout(
-      () => {
-        store.autoSyncReady = true
-      },
-      2000
-    )
-    if (store.config.checkUpdateOnStart) {
-      store.onCheckUpdate(false)
+      await Promise.all(all)
+        .then(arr => {
+          for (const { name, data } of arr) {
+            const dt = JSON.parse(data || '[]')
+            refsStatic.add('oldState-' + name, dt)
+            if (name === 'bookmarks') {
+              ext.bookmarksMap = new Map(
+                dt.map(d => [d.id, d])
+              )
+            }
+            ext[name] = dt
+          }
+        })
+      ext.lastDataUpdateTime = await getData('lastDataUpdateTime') || 0
+      ext.initLoadingData = false
+      Object.assign(store, ext)
+      store.loadFontList()
+      store.fetchItermThemes()
+      store.openInitSessions()
+      store.fetchSshConfigItems()
+      store.initCommandLine().catch(store.onError)
+      initWatch(store)
+      setTimeout(
+        () => {
+          store.fixProfiles()
+          store.fixBookmarkGroups()
+        },
+        1000
+      )
+      setTimeout(
+        () => {
+          store.autoSyncReady = true
+        },
+        2000
+      )
+      if (store.config.checkUpdateOnStart) {
+        store.onCheckUpdate(false)
+      }
+      store.startAutoRunWidgets().catch(err => {
+        console.error('Failed to start autorun widgets:', err)
+      })
+    } catch (err) {
+      store.initLoadingData = false
+      store.onError(err)
     }
-    store.startAutoRunWidgets().catch(err => {
-      console.error('Failed to start autorun widgets:', err)
-    })
   }
   Store.prototype.initCommandLine = async function () {
     const opts = await window.pre.runGlobalAsync('initCommandLine')

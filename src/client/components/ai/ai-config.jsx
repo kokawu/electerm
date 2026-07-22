@@ -4,9 +4,11 @@ import {
   Button,
   AutoComplete,
   Alert,
-  Space
+  Space,
+  Dropdown
 } from 'antd'
 import { useEffect, useState } from 'react'
+import { DownOutlined } from '@ant-design/icons'
 import Link from '../common/external-link'
 import AiCache from './ai-cache'
 import {
@@ -15,6 +17,8 @@ import {
 import Password from '../common/password'
 import AiHistory, { addHistoryItem } from './ai-history'
 import message from '../common/message'
+import { getAIPresets } from './ai-config-props'
+import { appendMandatoryGuardrails } from './ai-guardrails'
 
 const STORAGE_KEY_CONFIG = 'ai_config_history'
 const EVENT_NAME_CONFIG = 'ai-config-history-update'
@@ -33,6 +37,14 @@ const proxyOptions = [
   { value: 'socks5://127.0.0.1:1080' },
   { value: 'http://127.0.0.1:8080' },
   { value: 'https://proxy.example.com:3128' }
+]
+
+const authHeaderOptions = [
+  { value: 'Authorization: Bearer' },
+  { value: 'x-api-key' },
+  { value: 'api-key' },
+  { value: 'Authorization: Api-Key' },
+  { value: 'Authorization' }
 ]
 
 export default function AIConfigForm ({ initialValues, onSubmit, showAIConfig }) {
@@ -63,12 +75,13 @@ export default function AIConfigForm ({ initialValues, onSubmit, showAIConfig })
         'AIchat',
         'Hi',
         values.modelAI,
-        values.roleAI,
+        appendMandatoryGuardrails(values.roleAI),
         values.baseURLAI,
         values.apiPathAI,
         values.apiKeyAI,
         values.proxyAI,
-        false
+        false,
+        values.authHeaderNameAI
       )
       if (res && res.error) {
         message.error(res.error)
@@ -92,6 +105,33 @@ export default function AIConfigForm ({ initialValues, onSubmit, showAIConfig })
     }
   }
 
+  function handleSelectPreset (preset) {
+    const fields = ['nameAI', 'baseURLAI', 'apiPathAI', 'modelAI', 'authHeaderNameAI', 'modelAI', 'apiKeyAI']
+    const values = {}
+    fields.forEach(f => {
+      if (preset[f] !== undefined) {
+        values[f] = preset[f]
+      }
+    })
+    form.setFieldsValue(values)
+  }
+
+  function renderPresetMenu () {
+    const presets = getAIPresets()
+    const items = presets.map(p => ({
+      key: p.id,
+      label: p.nameAI,
+      onClick: () => handleSelectPreset(p)
+    }))
+    return (
+      <Dropdown menu={{ items }} trigger={['click']}>
+        <Button>
+          {e('presets') || 'Presets'} <DownOutlined />
+        </Button>
+      </Dropdown>
+    )
+  }
+
   function renderHistoryItem (item) {
     if (!item || typeof item !== 'object') return { label: 'Unknown', title: 'Unknown' }
     const name = item.nameAI || ''
@@ -104,11 +144,14 @@ export default function AIConfigForm ({ initialValues, onSubmit, showAIConfig })
     return { label, title }
   }
 
-  function renderApiUrlLabel () {
+  function renderApiKeyLabel () {
     if (baseURLAI === 'https://api.atlascloud.ai/v1') {
-      return <span>API URL (<Link to='https://atlascloud.ai'>AtlasCloud</Link>)</span>
+      return <span className='bold'>API Key (<Link to='https://www.atlascloud.ai/?utm_source=electerm_app&utm_medium=link&utm_campaign=electerm'>get API key from atlascloud</Link>)</span>
     }
-    return 'API URL'
+    if (baseURLAI === 'https://ai.electerm.org/api/ai') {
+      return <span className='bold'>API Key (<Link to='https://ai.electerm.org?utm=electerm'>get API key from ai.electerm.org(free)</Link>)</span>
+    }
+    return 'API Key'
   }
 
   if (!showAIConfig) {
@@ -122,8 +165,18 @@ export default function AIConfigForm ({ initialValues, onSubmit, showAIConfig })
           <Link to={aiConfigWikiLink}>WIKI: {aiConfigWikiLink}</Link>
         }
         type='info'
-        className='mg2y'
+        className='mg2t mg1b'
       />
+      <Alert
+        title={
+          window.translate('aiWarn')
+        }
+        type='warning'
+        className='mg2b'
+      />
+      <div className='mg1b alignright'>
+        {renderPresetMenu()}
+      </div>
       <p>
         Full Url: {initialValues?.baseURLAI}{initialValues?.apiPathAI}
       </p>
@@ -142,7 +195,7 @@ export default function AIConfigForm ({ initialValues, onSubmit, showAIConfig })
             placeholder='e.g. DeepSeek Relay, Local Ollama (optional)'
           />
         </Form.Item>
-        <Form.Item label={renderApiUrlLabel()} required>
+        <Form.Item label='API URL' required>
           <Space.Compact className='width-100'>
             <Form.Item
               label='API URL'
@@ -184,10 +237,23 @@ export default function AIConfigForm ({ initialValues, onSubmit, showAIConfig })
         </Form.Item>
 
         <Form.Item
-          label='API Key'
+          label={renderApiKeyLabel()}
           name='apiKeyAI'
         >
           <Password placeholder='Enter your API key' />
+        </Form.Item>
+
+        <Form.Item
+          label='Auth Header'
+          name='authHeaderNameAI'
+          tooltip='Header format for API authentication. e.g. "Authorization: Bearer" sends "Authorization: Bearer <key>", "x-api-key" sends "x-api-key: <key>"'
+        >
+          <AutoComplete
+            options={authHeaderOptions}
+            filterOption={filter}
+          >
+            <Input placeholder='e.g. Authorization: Bearer' />
+          </AutoComplete>
         </Form.Item>
 
         <Form.Item

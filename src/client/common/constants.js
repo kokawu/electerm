@@ -197,6 +197,7 @@ export const commonLineEndings = commonTxLineEndings
 
 export const maxBatchInput = 30
 export const windowControlWidth = 94
+export const mobileBreakpoint = 800
 export const baseUpdateCheckUrls = [
   packInfo.homepage,
   'https://gitee.com/github-zxdong262/electerm/raw/gh-pages'
@@ -212,7 +213,7 @@ export const syncTokenCreateUrls = {
   gitee: 'https://gitee.com/github-zxdong262/electerm/wikis/Create%20personal%20access%20token?sort_id=3028409',
   github: 'https://github.com/electerm/electerm/wiki/Create-personal-access-token',
   custom: 'https://github.com/electerm/electerm/wiki/Custom-sync-server',
-  cloud: 'https://electerm-cloud.html5beta.com',
+  cloud: 'https://sync.electerm.org',
   webdav: 'https://github.com/electerm/electerm/wiki/WebDAV-sync'
 }
 export const settingSyncId = 'setting-sync'
@@ -241,7 +242,6 @@ export const termLSPrefix = 'term:sess:'
 export const batchInputLsKey = 'batch-inputs'
 export const rendererTypes = {
   dom: 'dom',
-  canvas: 'canvas',
   webGL: 'webGL'
 }
 export const downloadUpgradeTimeout = 20000
@@ -257,6 +257,7 @@ export const regexHelpLink = 'https://github.com/electerm/electerm/wiki/Terminal
 export const connectionHoppingWikiLink = 'https://github.com/electerm/electerm/wiki/Connection-Hopping-Behavior-Change-in-electerm-since-v1.50.65'
 export const aiConfigWikiLink = 'https://github.com/electerm/electerm/wiki/AI-model-config-guide'
 export const aiChatModeLsKey = 'ai-chat-mode'
+export const lastAiChatSessionIdKey = 'last-ai-chat-session-id'
 export const modals = {
   hide: 0,
   setting: 1

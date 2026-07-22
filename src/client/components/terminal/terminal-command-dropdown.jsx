@@ -2,7 +2,7 @@ import { Component } from 'manate/react/class-components'
 import { refsStatic, refs } from '../common/ref'
 import SuggestionItem from './cmd-item'
 import { aiSuggestionsCache } from '../../common/cache'
-import uid from '../../common/uid'
+import { appendMandatoryGuardrails } from '../ai/ai-guardrails'
 import classnames from 'classnames'
 import {
   LoadingOutlined
@@ -68,10 +68,12 @@ export default class TerminalCmdSuggestions extends Component {
       'AIchat',
       prompt,
       config.modelAI,
-      config.roleAI,
+      appendMandatoryGuardrails(config.roleAI),
       config.baseURLAI,
       config.apiPathAI,
-      config.apiKeyAI
+      config.apiKeyAI,
+      false,
+      config.authHeaderNameAI
     ).catch(
       window.store.onError
     )
@@ -128,6 +130,7 @@ export default class TerminalCmdSuggestions extends Component {
     } else {
       position.top = top + cellHeight
     }
+    this._suggestionsCache = null
     this.setState({
       showSuggestions: true,
       cursorPosition: position,
@@ -186,6 +189,7 @@ export default class TerminalCmdSuggestions extends Component {
         window.store.addCmdHistory(item.command, 'aiCmdHistory')
       })
     }
+    this._suggestionsCache = null
     this.setState({
       showSuggestions: false,
       aiSuggestions: [],
@@ -259,7 +263,8 @@ export default class TerminalCmdSuggestions extends Component {
         if (!uniqueCommands.has(command)) {
           uniqueCommands.add(command)
           res.push({
-            id: uid(),
+            // Use stable key to avoid React re-mounting items on every render
+            id: type + ':' + command,
             command,
             type
           })
@@ -275,7 +280,7 @@ export default class TerminalCmdSuggestions extends Component {
       if (b.password && !seen.has(b.password)) {
         seen.add(b.password)
         res.push({
-          id: uid(),
+          id: 'PW:' + b.password,
           command: b.password,
           type: 'PW',
           hint: [b.username, [b.host, b.port].filter(Boolean).join(':')].filter(Boolean).join('@')
@@ -285,28 +290,41 @@ export default class TerminalCmdSuggestions extends Component {
     return this.state.reverse ? res.reverse() : res
   }
 
+  _suggestionsCache = null
+  _suggestionsCacheKey = ''
+
   getSuggestions = () => {
+    // Memoize: only recompute when cmd, reverse, aiSuggestions, or props change
+    const { cmd, reverse, aiSuggestions } = this.state
+    const { suggestions } = this.props
+    const cacheKey = cmd + '|' + reverse + '|' + (aiSuggestions?.length || 0) + '|' + (suggestions?.history?.length || 0) + '|' + (suggestions?.batch?.length || 0) + '|' + (suggestions?.quick?.length || 0)
+    if (this._suggestionsCache && this._suggestionsCacheKey === cacheKey) {
+      return this._suggestionsCache
+    }
     const uniqueCommands = new Set()
     const {
       history = [],
       batch = [],
       quick = []
-    } = this.props.suggestions || {}
+    } = suggestions || {}
     const res = []
-    this.state.aiSuggestions
+    aiSuggestions
       .forEach(item => {
         if (!uniqueCommands.has(item.command)) {
           uniqueCommands.add(item.command)
         }
         res.push({
-          id: uid(),
+          id: 'AI:' + item.command,
           ...item
         })
       })
     this.processCommands(history, 'H', uniqueCommands, res)
     this.processCommands(batch, 'B', uniqueCommands, res)
     this.processCommands(quick, 'Q', uniqueCommands, res)
-    return this.state.reverse ? res.reverse() : res
+    const finalRes = reverse ? res.reverse() : res
+    this._suggestionsCache = finalRes
+    this._suggestionsCacheKey = cacheKey
+    return finalRes
   }
 
   renderAIIcon () {

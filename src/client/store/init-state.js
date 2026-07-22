@@ -22,7 +22,9 @@ import {
   qmSortByFrequencyKey,
   resolutionsLsKey,
   syncServerDataKey,
-  splitMap
+  splitMap,
+  lastAiChatSessionIdKey,
+  mobileBreakpoint
 } from '../common/constants'
 import * as ls from '../common/safe-local-storage'
 import { exclude } from 'manate'
@@ -48,6 +50,7 @@ export default () => {
     // common
     wsInited: false,
     configLoaded: false,
+    initLoadingData: false,
     loadTime: 0,
     lastDataUpdateTime: 0,
     tabs: [],
@@ -87,6 +90,9 @@ export default () => {
     // batch input selected tab ids
     _batchInputSelectedTabIds: new Set(),
     aiChatHistory: [],
+    agentRunning: false,
+    currentChatSessionId: window.localStorage.getItem(lastAiChatSessionIdKey) || '',
+    showChatSessions: false,
 
     // sftp
     fileOperation: fileOperationsMap.cp, // cp or mv
@@ -117,7 +123,7 @@ export default () => {
     rightPanelVisible: false,
     rightPanelTab: 'info',
     rightPanelPinned: false,
-    rightPanelWidth: parseInt(ls.getItem(rightSidebarWidthKey), 10) || 500,
+    _rightPanelWidth: parseInt(ls.getItem(rightSidebarWidthKey), 10) || 500,
     showAIConfigModal: false,
 
     // for settings related
@@ -158,7 +164,7 @@ export default () => {
 
     // sidebar
     openedSideBar: ls.getItem(openedSidebarKey) || '',
-    leftSidebarWidth: parseInt(ls.getItem(leftSidebarWidthKey), 10) || 300,
+    _leftSidebarWidth: parseInt(ls.getItem(leftSidebarWidthKey), 10) || 300,
     addPanelWidth: parseInt(ls.getItem(addPanelWidthLsKey), 10) || 300,
     menuOpened: false,
     pinned: ls.getItem(sidebarPinnedKey) === 'true',
@@ -195,6 +201,7 @@ export default () => {
     height: 500,
     isMaximized: window.pre.runSync('isMaximized'),
     hasNodePty: window.pre.runSync('nodePtyCheck'),
+    isMobile: window.innerWidth <= mobileBreakpoint,
     fullscreen: false,
     hideDelKeyTip: ls.getItem(dismissDelKeyTipLsKey) === 'y',
     tabsHeight: 36,

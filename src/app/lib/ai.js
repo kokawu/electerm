@@ -29,12 +29,19 @@ exports.stopStream = (sessionId) => {
   return { stopped: true }
 }
 
-const createAIClient = (baseURL, apiKey, proxy) => {
+const createAIClient = (baseURL, apiKey, proxy, authHeaderName) => {
+  const headerStr = authHeaderName || 'Authorization: Bearer'
+  const parts = headerStr.split(': ')
+  const headerKey = parts[0]
+  const headerPrefix = parts.length > 1 ? parts[1] : ''
+  const headerValue = headerPrefix
+    ? `${headerPrefix} ${apiKey}`
+    : apiKey
   const config = {
     baseURL,
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`
+      [headerKey]: headerValue
     }
   }
 
@@ -48,9 +55,9 @@ const createAIClient = (baseURL, apiKey, proxy) => {
   return axios.create(config)
 }
 
-exports.AIchatWithTools = async (messages, model, baseURL, path, apiKey, proxy, tools) => {
+exports.AIchatWithTools = async (messages, model, baseURL, path, apiKey, proxy, tools, authHeaderName) => {
   try {
-    const client = createAIClient(baseURL, apiKey, proxy)
+    const client = createAIClient(baseURL, apiKey, proxy, authHeaderName)
     const requestData = {
       model,
       messages,
@@ -78,28 +85,33 @@ exports.AIchat = async (
   path = defaultSettings.apiPathAI,
   apiKey,
   proxy = defaultSettings.proxyAI,
-  stream = true
+  stream = true,
+  authHeaderName = defaultSettings.authHeaderNameAI,
+  messages = null
 ) => {
   try {
-    const client = createAIClient(baseURL, apiKey, proxy)
+    const client = createAIClient(baseURL, apiKey, proxy, authHeaderName)
 
     // Determine if we should use streaming based on the prompt content
     // Command suggestions should not use streaming for quick response
     const isCommandSuggestion = prompt.includes('give me max 5 command suggestions')
     const useStream = stream && !isCommandSuggestion
 
+    // Use provided conversation messages if available, otherwise build from prompt and role
+    const requestMessages = messages || [
+      {
+        role: 'system',
+        content: role
+      },
+      {
+        role: 'user',
+        content: prompt
+      }
+    ]
+
     const requestData = {
       model,
-      messages: [
-        {
-          role: 'system',
-          content: role
-        },
-        {
-          role: 'user',
-          content: prompt
-        }
-      ],
+      messages: requestMessages,
       stream: useStream
     }
 

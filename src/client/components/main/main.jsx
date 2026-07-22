@@ -2,6 +2,7 @@ import { auto } from 'manate/react'
 import { useEffect } from 'react'
 import Layout from '../layout/layout'
 import FileInfoModal from '../sftp/file-info-modal'
+import FileCompareModal from '../sftp/file-compare-modal'
 import UpdateCheck from './upgrade'
 import SettingModal from '../setting-panel/setting-modal'
 import TextEditor from '../text-editor/text-editor-entry'
@@ -40,6 +41,7 @@ import { pick } from 'lodash-es'
 import deepCopy from 'json-deep-copy'
 import './wrapper.styl'
 import TerminalInfo from '../terminal-info/terminal-info-entry'
+import '../../common/fs.js'
 import './term-fullscreen.styl'
 
 export default auto(function Index (props) {
@@ -111,7 +113,9 @@ export default auto(function Index (props) {
     'not-win': !isWin,
     'qm-pinned': pinnedQuickCommandBar,
     fullscreen,
-    'is-main': !isSecondInstance
+    'is-main': !isSecondInstance,
+    'is-mobile': store.isMobile,
+    'is-desktop': !store.isMobile
   })
   const ext1 = {
     className: cls
@@ -168,6 +172,7 @@ export default auto(function Index (props) {
       'sidebarPanelTab',
       'openWidgetsModal'
     ]),
+    zoom: config.zoom,
     fileTransfers: copiedTransfer,
     transferHistory: copiedHistory,
     upgradeInfo,
@@ -231,7 +236,10 @@ export default auto(function Index (props) {
     tabs: store.getTabs(),
     activeTabId: store.activeTabId,
     showAIConfig: store.showAIConfig,
-    rightPanelTab
+    rightPanelTab,
+    agentRunning: store.agentRunning,
+    currentChatSessionId: store.currentChatSessionId,
+    showChatSessions: store.showChatSessions
   }
   const cmdSuggestionsProps = {
     suggestions: store.terminalCommandSuggestions
@@ -260,6 +268,7 @@ export default auto(function Index (props) {
           installSrc={installSrc}
         />
         <FileInfoModal />
+        <FileCompareModal />
         <SettingModal store={store} />
         <MoveItemModal store={store} />
         <div

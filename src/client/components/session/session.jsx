@@ -56,7 +56,9 @@ export default class SessionWrapper extends Component {
       broadcastInput: false,
       keepaliveEnabled: false
     }
-    props.tab.sshSftpSplitView = !!props.config.sshSftpSplitView
+    if (props.tab.sshSftpSplitView === undefined) {
+      props.tab.sshSftpSplitView = !!props.config.sshSftpSplitView
+    }
   }
 
   minWithForSplit = 640
@@ -537,7 +539,7 @@ export default class SessionWrapper extends Component {
   }
 
   renderKeepaliveIcon = () => {
-    if (this.isSshDisabled() || !this.props.tab.authType) {
+    if (this.isSshDisabled()) {
       return null
     }
     const { keepaliveEnabled } = this.state
@@ -592,6 +594,9 @@ export default class SessionWrapper extends Component {
   }
 
   renderSplitToggle = () => {
+    if (window.store.isMobile) {
+      return null
+    }
     if (!this.canSplitView() || this.isNotTerminalType()) {
       return null
     }
@@ -651,7 +656,8 @@ export default class SessionWrapper extends Component {
     const simpleMapper = {
       [paneMap.terminal]: 'T',
       [paneMap.fileManager]: 'F',
-      [paneMap.ssh]: 'T'
+      [paneMap.ssh]: 'T',
+      [paneMap.sftp]: 'S'
     }
     return (
       <div className='term-sftp-tabs fleft'>
@@ -671,8 +677,8 @@ export default class SessionWrapper extends Component {
                 onClick={() => this.onChangePane(types[i])}
               >
                 <span className='type-tab-txt'>
-                  <span className='w500'>{e(type)}</span>
-                  <span className='l500'>{simpleMapper[type]}</span>
+                  <span className='w800'>{e(type)}</span>
+                  <span className='l800'>{simpleMapper[type]}</span>
                   <span className='type-tab-line' />
                 </span>
               </span>

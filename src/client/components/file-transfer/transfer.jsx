@@ -3,7 +3,6 @@ import copy from 'json-deep-copy'
 import { isFunction } from 'lodash-es'
 import generate from '../../common/uid'
 import { typeMap, transferTypeMap, fileOperationsMap, fileActions } from '../../common/constants'
-import fs from '../../common/fs'
 import format, { computeLeftTime, computePassedTime } from './transfer-speed-format'
 import {
   getLocalFileInfo,
@@ -11,6 +10,7 @@ import {
   getFolderFromFilePath
 } from '../sftp/file-read'
 import resolve from '../../common/resolve'
+import sanitizeFilename from '../../common/sanitize-filename'
 import { refsTransfers, refsStatic, refs } from '../common/ref'
 import {
   zipCmd,
@@ -257,7 +257,7 @@ export default class TransportAction extends Component {
       })
     }
     if (typeFrom === typeMap.local) {
-      return fs[operation](fromPath, finalToPath)
+      return window.fs[operation](fromPath, finalToPath)
         .then(this.onEnd)
         .catch(e => {
           this.onEnd()
@@ -436,7 +436,7 @@ export default class TransportAction extends Component {
     let isFromRemote
     if (typeFrom === typeMap.local) {
       isFromRemote = false
-      p = await fs.zipFolder(fromPath)
+      p = await window.fs.zipFolder(fromPath)
     } else {
       isFromRemote = true
       const terminalId = refs.get('sftp-' + this.tabId)?.terminalId
@@ -484,22 +484,22 @@ export default class TransportAction extends Component {
       }
     } else {
       if (newName) {
-        await fs.mkdir(path)
+        await window.fs.mkdir(path)
       }
-      await fs.unzipFile(toPath, path)
+      await window.fs.unzipFile(toPath, path)
       if (newName) {
         const mvFrom = resolve(path, name)
         const mvTo = resolve(targetPath, newName)
-        await fs.mv(mvFrom, mvTo)
+        await window.fs.mv(mvFrom, mvTo)
       }
     }
     await rmCmd(terminalId, !isToRemote ? fromPath : toPath)
-    await fs.rmrf(!isToRemote ? toPath : fromPath)
+    await window.fs.rmrf(!isToRemote ? toPath : fromPath)
     if (newName) {
       if (isToRemote) {
         await rmCmd(terminalId, path)
       } else {
-        await fs.rmrf(path)
+        await window.fs.rmrf(path)
       }
     }
     this.onEnd()
@@ -673,7 +673,7 @@ export default class TransportAction extends Component {
         }
 
         const fromItemPath = resolve(fromPath, file.name)
-        const toItemPath = resolve(toPath, file.name)
+        const toItemPath = resolve(toPath, sanitizeFilename(file.name))
 
         const itemTransfer = {
           ...transfer,
@@ -712,7 +712,7 @@ export default class TransportAction extends Component {
 
       const batchFolders = folders.slice(i, i + batch)
       const createFolderPromises = batchFolders.map(folder => {
-        const toItemPath = resolve(toPath, folder.name)
+        const toItemPath = resolve(toPath, sanitizeFilename(folder.name))
 
         // Create folder itself (don't process contents)
         const createTransfer = {
@@ -735,7 +735,7 @@ export default class TransportAction extends Component {
       }
 
       const fromItemPath = resolve(fromPath, folder.name)
-      const toItemPath = resolve(toPath, folder.name)
+      const toItemPath = resolve(toPath, sanitizeFilename(folder.name))
 
       const itemTransfer = {
         ...transfer,
@@ -821,7 +821,7 @@ export default class TransportAction extends Component {
       tabId
     } = transfer
     if (typeTo === typeMap.local) {
-      return fs.mkdir(toPath)
+      return window.fs.mkdir(toPath)
         .then(() => true)
         .catch(() => false)
     }

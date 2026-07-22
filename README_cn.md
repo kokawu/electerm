@@ -1,34 +1,31 @@
 <h1 align="center" style="padding-top: 60px;padding-bottom: 40px;">
-    <a href="https://electerm.github.io/electerm">
+    <a href="https://electerm.org">
         <img src="https://github.com/electerm/electerm-resource/raw/master/static/images/electerm.png", alt="" />
     </a>
 </h1>
 
-# electerm [![Tweet](https://badgers.space/badge/Tweet/Tweet/social)](https://twitter.com/intent/tweet?text=Open%20sourced%20terminal%2Fssh%2Fsftp%20client(linux%2C%20mac%2C%20win)&url=https%3A%2F%2Fgithub.com%2Felecterm%2Felecterm&hashtags=electerm,ssh,terminal,sftp)
-
 [![GitHub version](https://badgers.space/github/release/electerm/electerm?corner_radius=m)](https://github.com/electerm/electerm/releases)
 [![Build Status](https://github.com/electerm/electerm/actions/workflows/mac-test-1.yml/badge.svg)](https://github.com/electerm/electerm/actions)
-[![license](https://img.shields.io/github/license/electerm/electerm)](https://github.com/electerm/electerm/blob/master/LICENSE)
-[![JavaScript Style Guide](https://img.shields.io/badge/code_style-standard-brightgreen.svg)](https://standardjs.com)
+[![license](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/electerm/electerm/blob/master/LICENSE)
 [![Get it from the Snap Store](https://img.shields.io/badge/Snap-Store-green)](https://snapcraft.io/electerm)
 [![Get it from the Microsoft Store](https://img.shields.io/badge/Microsoft-Store-blue)](https://www.microsoft.com/store/apps/9NCN7272GTFF)
-[![Debian Repository](https://img.shields.io/badge/Debian-Repository-red)](https://electerm-repos.html5beta.com/deb)
 [![GitHub Sponsors](https://img.shields.io/github/sponsors/electerm?label=Sponsors)](https://github.com/sponsors/electerm)
-[![Powered by manate](https://img.shields.io/badge/Powered%20by-manate-blue)](https://github.com/tylerlong/manate)
-[![Discord](https://img.shields.io/badge/Discord-Join-blue?logo=discord)](https://discord.gg/855W7g8EVd)
 [![star](https://atomgit.com/electerm/electerm/star/badge.svg)](https://atomgit.com/electerm/electerm)
 
 [![English](https://img.shields.io/badge/English-EN-blue)](README.md) [![中文](https://img.shields.io/badge/中文-Chinese-blue)](README_cn.md)
 
-[![DigitalOcean Referral Badge](https://web-platforms.sfo2.cdn.digitaloceanspaces.com/WWW/Badge%202.svg)](https://www.digitalocean.com/?refcode=c10bcb28b846&utm_campaign=Referral_Invite&utm_medium=Referral_Program&utm_source=badge)
-
-[![Vercel OSS Program](https://vercel.com/oss/program-badge.svg)](https://vercel.com/oss)
 
 开源终端/ssh/telnet/serialport/RDP/VNC/Spice/sftp/ftp客户端(linux, mac, win)。
 
-有经验的开发者也可以尝试运行于浏览器(支持移动设备)的web app版本: [electerm-web](https://github.com/electerm/electerm-web) 或者 [docker image for electerm-web](https://github.com/electerm/electerm-web-docker)
-
-在线演示: [https://electerm-demo.html5beta.com](https://electerm-demo.html5beta.com)
+- [electerm.org](https://electerm.org): 主页，下载，视频等
+- [electerm-web](https://github.com/electerm/electerm-web): 运行于浏览器(支持移动设备)的web app版本
+- [electerm-web-docker](https://github.com/electerm/electerm-web-docker): electerm-web的docker镜像
+- [electerm online](https://cloud.electerm.org): 公共免费在线electerm应用
+- [electerm demo](https://demo.electerm.org): 在线演示
+- [electerm AI](https://ai.electerm.org): 免费为 electerm 用户提供 AI
+- [electerm Android](https://github.com/electerm/electerm-android): electerm for Android
+- [electerm deb repo](https://repos.electerm.org/deb): Debian repo of electerm
+- [electerm rpm repo](https://repos.electerm.org/rpm): RPM repo of electerm
 
 ## Atlas Cloud
 
@@ -39,6 +36,10 @@
 </div>
 
 [Atlas Cloud](https://www.atlascloud.ai/?utm_source=github&utm_medium=link&utm_campaign=electerm) 提供与 OpenAI 兼容的 AI API 和模型访问，用于在 electerm 中实现 AI 驱动的工作流程。
+
+[![DigitalOcean Referral Badge](https://web-platforms.sfo2.cdn.digitaloceanspaces.com/WWW/Badge%202.svg)](https://www.digitalocean.com/?refcode=c10bcb28b846&utm_campaign=Referral_Invite&utm_medium=Referral_Program&utm_source=badge)
+
+[![Vercel OSS Program](https://github.com/electerm/electerm-resource/blob/master/static/images/vercel-oss-2005.png?raw=true)](https://oss-directory.vercel.app)
 
 <div align="center">
   <img src="https://github.com/electerm/electerm-resource/raw/master/static/images/electerm.gif", alt="" />
@@ -68,11 +69,6 @@
 - 支持命令行使用: 请参阅[wiki](https://github.com/electerm/electerm/wiki/Command-line-usage)
 - 深度链接支持: 使用 `telnet://192.168.2.31:34554` 或 `ssh://user@host:22` 等URL打开连接 - 详见 [深度链接支持 wiki](https://github.com/electerm/electerm/wiki/Deep-link-support)
 
-## 下载
-
-- [主页](https://electerm.html5beta.com)
-- [sourceforge](https://sourceforge.net/projects/electerm.mirror/files/)
-- [github releases](https://github.com/electerm/electerm/releases)
 
 ## 安装
 
@@ -93,7 +89,7 @@ scoop install dorado/electerm
 
 - 从Debian软件源安装 (适用于Debian/Ubuntu系统) 使用 `apt` 命令
 
-查看 [https://electerm-repos.html5beta.com/deb](https://electerm-repos.html5beta.com/deb)
+查看 [https://repos.electerm.org/deb](https://repos.electerm.org/deb)
 
 - 从npm安装
 
@@ -122,7 +118,7 @@ npm i -g electerm
 
 [Discussion board](https://github.com/electerm/electerm/discussions)
 
-![electerm-wechat-group-qr.jpg](https://electerm.html5beta.com/electerm-wechat-group-qr.jpg)
+![electerm-wechat-group-qr.jpg](https://electerm.org/electerm-wechat-group-qr.jpg)
 
 ## 支持
 
@@ -140,13 +136,19 @@ kofi
 
 微信赞赏码
 
-[![wechat donate](https://electerm.html5beta.com/electerm-wechat-donate.png)](https://github.com/electerm)
+[![wechat donate](https://electerm.org/electerm-wechat-donate.png)](https://github.com/electerm)
+
+TRON TRN20
+
+[![TRN20 donate](https://github.com/electerm/electerm-resource/blob/master/static/images/trn20.png?raw=true)]
+
+地址: TXk3pQNmQu1vihH76RaEFnK9wg13x4LLCZ
 
 ## 开发
 
 ```bash
 # May only works in Linux
-# needs nodejs/npm, suggest using fnm to install nodejs/npm
+# needs nodejs/npm, suggest using nvm to install nodejs/npm
 # with nodejs 24.x
 
 git clone git@github.com:electerm/electerm.git
@@ -188,6 +190,7 @@ npm run test
 # Build linux only with -l
 npm i
 npm run b
+npm run pb
 ./node_modules/.bin/electron-builder --linux tar.gz
 # or replace tar.gz to rpm/deb/AppImage
 # check dist/ folder
@@ -198,7 +201,7 @@ npm run b
 
 ## 使用视频
 
-- [https://electerm.html5beta.com/videos](https://electerm.html5beta.com/videos)
+- [https://electerm.org/videos](https://electerm.org/videos)
 
 ## 变更历史
 
@@ -214,4 +217,14 @@ MIT
 
 ## 收藏历史
 
-[![Star History Chart](https://api.star-history.com/svg?repos=electerm/electerm&type=Date)](https://www.star-history.com/#electerm/electerm&Date)
+<p>
+ <a href="https://www.star-history.com/electerm/electerm"><img src="https://api.star-history.com/badge?repo=electerm/electerm" alt="Star History Rank" /></a>
+</p>
+
+<a href="https://www.star-history.com/?repos=electerm%2Felecterm&type=date&legend=top-left">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=electerm/electerm&type=date&legend=top-left&sealed_token=DvPlttPaLtq6RPIWRANYX08-8ZJyrJalhombrkDcg1IwWOMPMIplgi85q0FiwrbhE3lRIi_yxvOWdell731CGQvzlfJMt2Sa6VfCvQ80BwEtQ6RpPchEiw" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=electerm/electerm&type=date&legend=top-left&sealed_token=DvPlttPaLtq6RPIWRANYX08-8ZJyrJalhombrkDcg1IwWOMPMIplgi85q0FiwrbhE3lRIi_yxvOWdell731CGQvzlfJMt2Sa6VfCvQ80BwEtQ6RpPchEiw" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=electerm/electerm&type=date&legend=top-left&sealed_token=DvPlttPaLtq6RPIWRANYX08-8ZJyrJalhombrkDcg1IwWOMPMIplgi85q0FiwrbhE3lRIi_yxvOWdell731CGQvzlfJMt2Sa6VfCvQ80BwEtQ6RpPchEiw" />
+ </picture>
+</a>

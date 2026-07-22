@@ -1,5 +1,6 @@
 const express = require('express')
 const { Sftp } = require('./session-sftp')
+const { instSftpKeys } = require('../common/constants')
 const { Ftp } = require('./session-ftp')
 const {
   sftp,
@@ -9,7 +10,7 @@ const {
   terminals,
   cleanAllSessions
 } = require('./remote-common')
-const { Transfer } = require('./transfer')
+const { Transfer, transferKeys } = require('./transfer')
 const { Transfer: FtpTransfer } = require('./ftp-transfer')
 const app = express()
 const log = require('../common/log')
@@ -359,6 +360,16 @@ if (type === 'rdp') {
         const { id, args, func, uid } = msg
         const inst = sftp(id)
         if (inst) {
+          if (!instSftpKeys.includes(func) || typeof inst[func] !== 'function') {
+            ws.s({
+              id: uid,
+              error: {
+                message: 'invalid sftp function: ' + func,
+                stack: ''
+              }
+            })
+            return
+          }
           inst[func](...args)
             .then(data => {
               ws.s({
@@ -403,12 +414,14 @@ if (type === 'rdp') {
       if (action === 'transfer-new') {
         const { sftpId, id, isFtp } = msg
         const session = sftp(sftpId)
+        const encode = session.initOptions?.encode || 'utf8'
         const opts = Object.assign({}, msg, {
           sftp: session.sftp,
           conn: session.client,
           ftpSession: isFtp ? session : null,
           sftpId,
-          ws
+          ws,
+          encode
         })
         const Cls = isFtp ? FtpTransfer : Transfer
         transfer(id, sftpId, new Cls(opts))
@@ -417,7 +430,14 @@ if (type === 'rdp') {
         if (func === 'destroy') {
           return onDestroyTransfer(id, sftpId)
         }
-        transfer(id, sftpId)[func](...args)
+        if (!transferKeys.includes(func)) {
+          return
+        }
+        const tr = transfer(id, sftpId)
+        if (!tr || typeof tr[func] !== 'function') {
+          return
+        }
+        tr[func](...args)
       }
     })
     // end

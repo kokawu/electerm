@@ -4,13 +4,17 @@
 
 import handleError from '../common/error-handler'
 import Modal from '../components/common/modal'
+import { appendMandatoryGuardrails } from '../components/ai/ai-guardrails'
 import { debounce, some, get, pickBy } from 'lodash-es'
 import {
   leftSidebarWidthKey,
   rightSidebarWidthKey,
   addPanelWidthLsKey,
   dismissDelKeyTipLsKey,
-  connectionMap
+  connectionMap,
+  lastAiChatSessionIdKey,
+  mobileBreakpoint,
+  splitMap
 } from '../common/constants'
 import * as ls from '../common/safe-local-storage'
 import { refs, refsStatic } from '../components/common/ref'
@@ -57,14 +61,21 @@ export default Store => {
   Store.prototype.onResize = debounce(async function () {
     const { width, height } = await window.pre.runGlobalAsync('getScreenSize')
     const isMaximized = window.pre.runSync('isMaximized')
+    const w = window.innerWidth
+    const isMobile = w <= mobileBreakpoint
     const update = {
       height: window.innerHeight,
-      innerWidth: window.innerWidth,
+      innerWidth: w,
       screenWidth: width,
       screenHeight: height,
-      isMaximized
+      isMaximized,
+      isMobile
     }
     window.store.storeAssign(update)
+    // Force single-column layout on mobile
+    if (isMobile && window.store.layout !== splitMap.c1) {
+      window.store.setLayout(splitMap.c1)
+    }
     window.pre.runGlobalAsync('setWindowSize', {
       ...update,
       height: window.outerHeight
@@ -96,7 +107,7 @@ export default Store => {
 
   Store.prototype.setLeftSidePanelWidth = function (v) {
     ls.setItem(leftSidebarWidthKey, v)
-    window.store.leftSidebarWidth = v
+    window.store._leftSidebarWidth = v
   }
 
   Store.prototype.setAddPanelWidth = function (v) {
@@ -106,7 +117,7 @@ export default Store => {
 
   Store.prototype.setRightSidePanelWidth = function (v) {
     ls.setItem(rightSidebarWidthKey, v)
-    window.store.rightPanelWidth = v
+    window.store._rightPanelWidth = v
   }
   Store.prototype.dismissDelKeyTip = function (v) {
     ls.setItem(dismissDelKeyTipLsKey, 'y')
@@ -254,6 +265,166 @@ export default Store => {
       return
     }
     window.store.aiChatHistory.splice(index, 1)
+  }
+
+  Store.prototype.startNewChat = action(function () {
+    const { store } = window
+    store.currentChatSessionId = uid()
+    store.showChatSessions = false
+    window.localStorage.setItem(lastAiChatSessionIdKey, store.currentChatSessionId)
+  })
+
+  Store.prototype.loadChatSession = action(function (sessionId) {
+    const { store } = window
+    store.currentChatSessionId = sessionId
+    store.showChatSessions = false
+    window.localStorage.setItem(lastAiChatSessionIdKey, sessionId)
+  })
+
+  Store.prototype.deleteChatSession = action(function (sessionId) {
+    const { store } = window
+    const remaining = store.aiChatHistory.filter(d => d.chatSessionId !== sessionId)
+    store.aiChatHistory = remaining
+    if (store.currentChatSessionId === sessionId) {
+      store.startNewChat()
+    }
+  })
+
+  Store.prototype.clearAllChatSessions = action(function () {
+    const { store } = window
+    store.aiChatHistory = []
+    store.showChatSessions = false
+    store.startNewChat()
+  })
+
+  Store.prototype.compressChatSession = async function (sessionId) {
+    const { store } = window
+    const sessionEntries = store.aiChatHistory
+      .filter(h => h.chatSessionId === sessionId)
+      .sort((a, b) => a.timestamp - b.timestamp)
+
+    // Find the last compress entry
+    let lastCompressIndex = -1
+    for (let i = sessionEntries.length - 1; i >= 0; i--) {
+      if (sessionEntries[i].compressed) {
+        lastCompressIndex = i
+        break
+      }
+    }
+
+    // Need at least 2 non-compress entries since the last compress
+    const entriesAfterCompress = lastCompressIndex >= 0
+      ? sessionEntries.slice(lastCompressIndex + 1)
+      : sessionEntries
+    if (entriesAfterCompress.length < 2) {
+      return
+    }
+
+    const firstEntry = sessionEntries[0]
+    const lang = firstEntry.languageAI || store.getLangName()
+    const messages = [
+      { role: 'system', content: appendMandatoryGuardrails(firstEntry.roleAI + `;用[${lang}]回复`) }
+    ]
+
+    // Start from the last compress entry to include its summary as context
+    const startIndex = lastCompressIndex >= 0 ? lastCompressIndex : 0
+    for (let i = startIndex; i < sessionEntries.length; i++) {
+      const entry = sessionEntries[i]
+      if (entry.compressed) {
+        messages.push({
+          role: 'user',
+          content: `Here is a summary of our previous conversation for context:\n\n${entry.response}`
+        })
+        messages.push({
+          role: 'assistant',
+          content: 'Understood. I will use this context as we continue.'
+        })
+      } else {
+        messages.push({ role: 'user', content: entry.prompt })
+        if (entry.response) {
+          messages.push({ role: 'assistant', content: entry.response })
+        }
+      }
+    }
+
+    const summaryPrompt = 'Please summarize the above conversation concisely. Include key information, decisions, context, and any important details that would be needed to continue this conversation effectively.'
+    messages.push({ role: 'user', content: summaryPrompt })
+
+    const aiResponse = await window.pre.runGlobalAsync(
+      'AIchat',
+      summaryPrompt,
+      firstEntry.modelAI,
+      firstEntry.roleAI,
+      firstEntry.baseURLAI,
+      firstEntry.apiPathAI,
+      firstEntry.apiKeyAI,
+      firstEntry.proxyAI,
+      false,
+      firstEntry.authHeaderNameAI,
+      messages
+    )
+
+    if (aiResponse && aiResponse.error) {
+      return store.onError(new Error(aiResponse.error))
+    }
+
+    const summary = aiResponse.response || ''
+    const compressedEntry = {
+      id: uid(),
+      prompt: '*Compressed session summary*',
+      response: summary,
+      isStreaming: false,
+      pending: false,
+      sessionId: null,
+      chatSessionId: sessionId,
+      mode: firstEntry.mode,
+      toolCalls: [],
+      nameAI: firstEntry.nameAI,
+      modelAI: firstEntry.modelAI,
+      roleAI: firstEntry.roleAI,
+      baseURLAI: firstEntry.baseURLAI,
+      apiPathAI: firstEntry.apiPathAI,
+      apiKeyAI: firstEntry.apiKeyAI,
+      proxyAI: firstEntry.proxyAI,
+      languageAI: firstEntry.languageAI,
+      authHeaderNameAI: firstEntry.authHeaderNameAI,
+      timestamp: Date.now(),
+      compressed: true
+    }
+
+    // Append compress entry, preserve existing history
+    store.aiChatHistory.push(compressedEntry)
+  }
+
+  Store.prototype.toggleChatSessions = action(function () {
+    const { store } = window
+    store.showChatSessions = !store.showChatSessions
+  })
+
+  Store.prototype.getChatSessions = function () {
+    const { aiChatHistory } = window.store
+    const sessionMap = new Map()
+    for (const entry of aiChatHistory) {
+      const sid = entry.chatSessionId
+      if (!sid) continue
+      if (!sessionMap.has(sid)) {
+        sessionMap.set(sid, {
+          sessionId: sid,
+          firstPrompt: entry.prompt || '',
+          timestamp: entry.timestamp,
+          messageCount: 1,
+          entries: [entry]
+        })
+      } else {
+        const session = sessionMap.get(sid)
+        session.messageCount++
+        session.entries.push(entry)
+        if (entry.timestamp > session.timestamp) {
+          session.timestamp = entry.timestamp
+        }
+      }
+    }
+    return Array.from(sessionMap.values()).sort((a, b) => b.timestamp - a.timestamp)
   }
 
   Store.prototype.getLangName = function (

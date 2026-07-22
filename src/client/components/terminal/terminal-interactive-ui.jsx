@@ -90,7 +90,7 @@ export default function TermInteractiveUI ({
             type='primary'
             onClick={onConfirm}
           >
-            {opts.options.submitText || e('submit')}
+            {opts.options.submitText || e('save')}
           </Button>
           <Button
             className='mg1l'

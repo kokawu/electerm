@@ -11,7 +11,6 @@ import {
   settingMap,
   modals
 } from '../../common/constants'
-
 const TabBookmarks = lazy(() => import('./tab-bookmarks'))
 const TabQuickCommands = lazy(() => import('./tab-quick-commands'))
 const TabSettings = lazy(() => import('./tab-settings'))
@@ -71,7 +70,8 @@ export default auto(function SettingModalWrap (props) {
         'config',
         'checkedKeys',
         'expandedKeys',
-        'leftSidebarWidth'
+        'leftSidebarWidth',
+        'initLoadingData'
       ])
     }
     const items = [
@@ -182,6 +182,7 @@ export default auto(function SettingModalWrap (props) {
       visible={show}
       useSystemTitleBar={useSystemTitleBar}
       innerWidth={innerWidth}
+      isMobile={props.store.isMobile}
     >
       {renderTabs()}
     </SettingModal>

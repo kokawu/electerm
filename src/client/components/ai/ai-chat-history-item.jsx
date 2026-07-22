@@ -1,8 +1,9 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import AIOutput from './ai-output'
 import AIStopIcon from './ai-stop-icon'
 import AgentToolCallCard from './agent-tool-call-card'
 import { runAgentLoop } from './agent'
+import { appendMandatoryGuardrails } from './ai-guardrails'
 import {
   Alert,
   Tooltip
@@ -22,6 +23,7 @@ export default function AIChatHistoryItem ({ item }) {
   const {
     prompt,
     sessionId,
+    chatSessionId,
     nameAI,
     modelAI,
     roleAI,
@@ -29,6 +31,7 @@ export default function AIChatHistoryItem ({ item }) {
     apiPathAI,
     apiKeyAI,
     proxyAI,
+    authHeaderNameAI,
     languageAI,
     mode,
     toolCalls
@@ -40,8 +43,52 @@ export default function AIChatHistoryItem ({ item }) {
 
   function buildRole () {
     const lang = languageAI || window.store.getLangName()
-    return roleAI + `;用[${lang}]回复`
+    return appendMandatoryGuardrails(roleAI + `;用[${lang}]回复`)
   }
+
+  const conversationMessages = useMemo(() => {
+    if (!chatSessionId) {
+      return null
+    }
+    const sessionEntries = window.store.aiChatHistory
+      .filter(h => h.chatSessionId === chatSessionId && h.timestamp <= item.timestamp)
+      .sort((a, b) => a.timestamp - b.timestamp)
+
+    // Find the last compress entry
+    let lastCompressIndex = -1
+    for (let i = sessionEntries.length - 1; i >= 0; i--) {
+      if (sessionEntries[i].compressed) {
+        lastCompressIndex = i
+        break
+      }
+    }
+
+    const messages = [
+      { role: 'system', content: buildRole() }
+    ]
+
+    // Start from the last compress entry (if any), skip older history
+    const startIndex = lastCompressIndex >= 0 ? lastCompressIndex : 0
+    for (let i = startIndex; i < sessionEntries.length; i++) {
+      const entry = sessionEntries[i]
+      if (entry.compressed) {
+        messages.push({
+          role: 'user',
+          content: `Here is a summary of our previous conversation for context:\n\n${entry.response}`
+        })
+        messages.push({
+          role: 'assistant',
+          content: 'Understood. I will use this context as we continue.'
+        })
+      } else {
+        messages.push({ role: 'user', content: entry.prompt })
+        if (entry.response && entry.id !== item.id) {
+          messages.push({ role: 'assistant', content: entry.response })
+        }
+      }
+    }
+    return messages
+  }, [chatSessionId, item.id, item.timestamp])
 
   const pollStreamContent = useCallback(async (sid) => {
     try {
@@ -81,7 +128,9 @@ export default function AIChatHistoryItem ({ item }) {
         apiPathAI,
         apiKeyAI,
         proxyAI,
-        true
+        true,
+        authHeaderNameAI,
+        conversationMessages
       )
 
       if (aiResponse && aiResponse.error) {
@@ -107,7 +156,7 @@ export default function AIChatHistoryItem ({ item }) {
       window.store.removeAiHistory(item.id)
       window.store.onError(error)
     }
-  }, [prompt, modelAI, baseURLAI, apiPathAI, apiKeyAI, proxyAI, item.id, pollStreamContent])
+  }, [prompt, modelAI, baseURLAI, apiPathAI, apiKeyAI, proxyAI, authHeaderNameAI, item.id, pollStreamContent, conversationMessages])
 
   const startAgentRequest = useCallback(async () => {
     abortRef.current = false
@@ -118,10 +167,11 @@ export default function AIChatHistoryItem ({ item }) {
       apiPathAI,
       apiKeyAI,
       proxyAI,
-      languageAI
+      languageAI,
+      authHeaderNameAI
     }
-    await runAgentLoop(item, config, abortRef, setIsStreaming)
-  }, [modelAI, roleAI, baseURLAI, apiPathAI, apiKeyAI, proxyAI, languageAI, item.id])
+    await runAgentLoop(item, config, abortRef, setIsStreaming, conversationMessages)
+  }, [modelAI, roleAI, baseURLAI, apiPathAI, apiKeyAI, proxyAI, languageAI, authHeaderNameAI, item.id, conversationMessages])
 
   useEffect(() => {
     if (item.pending) {
@@ -173,7 +223,6 @@ export default function AIChatHistoryItem ({ item }) {
           {showOutput ? <CaretDownOutlined /> : <CaretRightOutlined />}
         </span>
         <span>{prompt}</span>
-        {renderStopButton()}
       </div>
     ),
     type: 'info'
@@ -244,6 +293,7 @@ export default function AIChatHistoryItem ({ item }) {
       </div>
       {renderToolCalls()}
       {showOutput && <AIOutput item={item} />}
+      {renderStopButton()}
     </div>
   )
 }

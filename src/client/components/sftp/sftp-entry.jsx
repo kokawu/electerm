@@ -25,7 +25,6 @@ import {
 } from '../../common/constants'
 import { hasFileInClipboardText } from '../../common/clipboard'
 import Client from '../../common/sftp'
-import fs from '../../common/fs'
 import ListTable from './list-table-ui'
 import deepCopy from 'json-deep-copy'
 import isValidPath from '../../common/is-valid-path'
@@ -223,7 +222,7 @@ export default class Sftp extends Component {
       let aValue = a[sortProp]
       let bValue = b[sortProp]
 
-      if (typeof aValue === 'string') {
+      if (typeof aValue === 'string' && typeof bValue === 'string') {
         aValue = aValue.toLowerCase()
         bValue = bValue.toLowerCase()
         return isDesc
@@ -410,8 +409,8 @@ export default class Sftp extends Component {
   localDel = async (file) => {
     const { name, isDirectory, path } = file
     const func = !isDirectory
-      ? fs.unlink
-      : fs.rmrf
+      ? window.fs.unlink
+      : window.fs.rmrf
     const p = resolve(path, name)
     await func(p).catch(window.store.onError)
   }
@@ -878,7 +877,7 @@ export default class Sftp extends Component {
   }
 
   localList = async (returnList = false, localPathReal, oldPath) => {
-    if (!fs) return
+    if (!window.fs) return
     if (!returnList) {
       this.setState({
         localLoading: true
@@ -892,7 +891,7 @@ export default class Sftp extends Component {
       const localPath = noPathInit ||
         this.getCwdLocal() ||
         this.getLocalHome()
-      const locals = await fs.readdirAsync(localPath)
+      const locals = await window.fs.readdirAsync(localPath)
       const local = []
       for (const name of locals) {
         const p = resolve(localPath, name)
@@ -973,6 +972,12 @@ export default class Sftp extends Component {
   }
 
   handleUploadFromBrowser = () => {
+    if (window.et.handleUploadFromBrowser) {
+      return window.et.handleUploadFromBrowser(
+        this.state.localPath,
+        this.localList
+      )
+    }
     const input = document.createElement('input')
     input.type = 'file'
     input.multiple = true
@@ -984,13 +989,10 @@ export default class Sftp extends Component {
         const formData = new FormData()
         formData.append('file', file)
         formData.append('path', localPath)
-        await window.fetch('/api/upload', {
+        await window.api.fetch('/api/upload', {
           method: 'POST',
-          body: formData,
-          headers: {
-            token: window.store?.config.tokenElecterm
-          }
-        })
+          body: formData
+        }).catch(handleErr)
       }
       this.localList()
     }
@@ -1025,6 +1027,11 @@ export default class Sftp extends Component {
     let np = await this.parsePath(type, this.state[nt])
     if (type === typeMap.remote) {
       np = normalizeRemotePath(np)
+    } else if (np.length > 1 && np.endsWith('/')) {
+      // Strip trailing slash except for root path and Windows drive roots
+      if (!/^[a-zA-Z]:\/$/.test(np)) {
+        np = np.replace(/\/+$/, '')
+      }
     }
     if (!isValidPath(np)) {
       return notification.warning({
@@ -1204,7 +1211,7 @@ export default class Sftp extends Component {
   renderSftpPanelTitle (type, username, host) {
     if (type === typeMap.remote) {
       return (
-        <div className='sftp-panel-title pd1t pd1b pd1x alignright'>
+        <div className='sftp-panel-title pd1t pd1b pd1x alignright elli'>
           <ReloadOutlined
             className='mg1r pointer'
             onClick={this.handleReloadRemoteSftp}

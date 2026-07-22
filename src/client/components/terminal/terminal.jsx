@@ -4,7 +4,8 @@ import clone from '../../common/to-simple-obj.js'
 import resolve from '../../common/resolve.js'
 import {
   Spin,
-  Dropdown
+  Dropdown,
+  Button
 } from 'antd'
 import message from '../common/message'
 import { notification } from '../common/notification'
@@ -41,6 +42,9 @@ import { CommandTrackerAddon } from './command-tracker-addon.js'
 import { Osc52Addon } from './osc52-addon.js'
 import AIIcon from '../icons/ai-icon.jsx'
 import {
+  AimOutlined
+} from '@ant-design/icons'
+import {
   getShellIntegrationCommand,
   detectRemoteShell,
   detectShellType
@@ -57,13 +61,16 @@ import {
   loadTerminal,
   loadFitAddon,
   loadWebLinksAddon,
-  loadCanvasAddon,
   loadWebglAddon,
   loadSearchAddon,
   loadLigaturesAddon,
   loadUnicode11Addon,
   loadImageAddon
 } from './xterm-loader.js'
+import {
+  createRendererThemeConfig,
+  handleTerminalColorQuery
+} from './terminal-color-query.mjs'
 
 const e = window.translate
 
@@ -87,7 +94,8 @@ class Term extends Component {
       reconnectCountdown: null,
       terminalError: null,
       dropFileModalVisible: false,
-      droppedFiles: []
+      droppedFiles: [],
+      fontSizeChanged: false
     }
     this.id = `term-${this.props.tab.id}`
     refs.add(this.id, this)
@@ -143,10 +151,8 @@ class Term extends Component {
       prevProps.themeConfig
     )
     if (themeChanged && this.term) {
-      this.term.options.theme = {
-        ...deepCopy(this.props.themeConfig),
-        background: 'rgba(0,0,0,0)'
-      }
+      this.term.options.theme = this.getRendererThemeConfig(this.props.themeConfig)
+      this.registerTerminalColorQueryHandlers(this.term, this.props.themeConfig)
     }
   }
 
@@ -158,6 +164,7 @@ class Term extends Component {
     if (this.term) {
       this.term.parent = null
     }
+    this.disposeTerminalColorQueryHandlers()
     Object.keys(this.timers).forEach(k => {
       clearTimeout(this.timers[k])
       this.timers[k] = null
@@ -275,6 +282,10 @@ class Term extends Component {
         if (['fontFamily', 'fontSize'].includes(name)) {
           this.onResize()
         }
+        if (name === 'fontSize') {
+          this.originalFontSize = curr
+          this.setState({ fontSizeChanged: false })
+        }
       }
     }
 
@@ -337,6 +348,23 @@ class Term extends Component {
     }
     term.options.fontSize = term.options.fontSize + v
     window.store.triggerResize()
+    if (this.originalFontSize == null) {
+      this.originalFontSize = term.options.fontSize - v
+    }
+    this.setState({
+      fontSizeChanged: term.options.fontSize !== this.originalFontSize
+    })
+  }
+
+  handleResetFontSize = () => {
+    const { term } = this
+    if (!term || this.originalFontSize == null) {
+      return
+    }
+    term.options.fontSize = this.originalFontSize
+    window.store.triggerResize()
+    this.setState({ fontSizeChanged: false })
+    term.focus()
   }
 
   isActiveTerminal = () => {
@@ -693,7 +721,7 @@ class Term extends Component {
     this.term.clear()
     this.term.focus()
     if (shouldClear) {
-      this.searchAddon._linesCache = undefined
+      this.searchAddon._lineCache.clear()
       this.timers.clearSearchTimer = setTimeout(() => {
         refsStatic.get('term-search')?.next()
       }, 100)
@@ -745,8 +773,8 @@ class Term extends Component {
   }
 
   updateSearchResults = (resultIndex) => {
-    const matches = this.searchAddon._highlightDecorations.map((highlight, i) => {
-      return highlight.match.row
+    const matches = this.searchAddon._resultTracker.searchResults.map((result, i) => {
+      return result.row
     })
 
     this.setState({
@@ -1140,39 +1168,110 @@ class Term extends Component {
       return
     }
     if (this.props.config.showCmdSuggestions) {
-      const data = this.getCurrentInput()
-      if (data && d !== '\r' && d !== '\n') {
-        const cursorPos = this.getCursorPosition()
-        this.openSuggestions(cursorPos, data)
-      } else {
+      if (d === '\r' || d === '\n') {
         this.closeSuggestions()
+        return
       }
+      // Debounce the suggestion opening to avoid expensive work
+      // (buffer read + getBoundingClientRect + React re-render) on every keystroke
+      this._debouncedOpenSuggestions()
     } else {
       this.closeSuggestions()
     }
   }
 
+  _debouncedOpenSuggestions = debounce(function () {
+    const data = this.getCurrentInput()
+    if (!data) {
+      this.closeSuggestions()
+      return
+    }
+    const cursorPos = this.getCursorPosition()
+    this.openSuggestions(cursorPos, data)
+  }, 80)
+
+  /**
+   * Called by AttachAddonCustom after data is written to the terminal buffer.
+   * This fires after server echo arrives, so getCurrentInput() reflects the
+   * latest state. We trigger a debounced suggestion refresh so the dropdown
+   * updates correctly after backspace, delete, and other edits that rely on
+   * server-side echo to update the buffer.
+   */
+  onTerminalWrite = () => {
+    if (!this.props.config.showCmdSuggestions) {
+      return
+    }
+    const suggestions = refsStatic.get('terminal-suggestions')
+    if (suggestions?.state?.showSuggestions && !suggestions?.state?.passwordMode) {
+      this._debouncedOpenSuggestions()
+    }
+  }
+
   loadRenderer = async (term, config) => {
-    if (config.rendererType === rendererTypes.canvas) {
-      const CanvasAddon = await loadCanvasAddon()
-      term.loadAddon(new CanvasAddon())
-    } else if (config.rendererType === rendererTypes.webGL) {
+    // xterm 6.x: only the built-in DOM renderer and the WebGL addon exist
+    // (the canvas renderer addon was removed in 6.x). 'dom' = no addon loaded
+    // (built-in DOM renderer). Legacy 'canvas' settings fall back to DOM.
+    if (config.rendererType === rendererTypes.webGL) {
       try {
         const WebglAddon = await loadWebglAddon()
         term.loadAddon(new WebglAddon())
       } catch (e) {
-        console.error('render with webgl failed, fallback to canvas')
+        console.error('render with webgl failed, fallback to dom renderer')
         console.error(e)
-        const CanvasAddon = await loadCanvasAddon()
-        term.loadAddon(new CanvasAddon())
+        // built-in DOM renderer is used (no addon loaded)
       }
     }
   }
 
+  terminalColorQueryDisposables = []
+
+  disposeTerminalColorQueryHandlers = () => {
+    this.terminalColorQueryDisposables.forEach(disposable => disposable?.dispose?.())
+    this.terminalColorQueryDisposables.length = 0
+  }
+
+  getVisibleTerminalBackground = () => {
+    const uiThemeConfig = window.store?.getUiThemeConfig?.() || {}
+    const dom = this.domRef.current
+    const cssMain = dom && window.getComputedStyle
+      ? window.getComputedStyle(dom).getPropertyValue('--main').trim()
+      : ''
+    return uiThemeConfig.main || cssMain || this.props.themeConfig.background
+  }
+
+  getVisibleTerminalForeground = () => {
+    const uiThemeConfig = window.store?.getUiThemeConfig?.() || {}
+    return uiThemeConfig.text
+  }
+
+  registerTerminalColorQueryHandlers = (term, themeConfig = {}) => {
+    this.disposeTerminalColorQueryHandlers()
+    if (!term?.parser?.registerOscHandler) {
+      return
+    }
+    const background = this.getVisibleTerminalBackground()
+    const foregroundFallback = this.getVisibleTerminalForeground()
+    this.terminalColorQueryDisposables.push(
+      term.parser.registerOscHandler(10, data => {
+        return handleTerminalColorQuery(term, 10, themeConfig.foreground, foregroundFallback, data)
+      }),
+      term.parser.registerOscHandler(11, data => {
+        return handleTerminalColorQuery(term, 11, background, themeConfig.background, data)
+      })
+    )
+  }
+
+  getRendererThemeConfig = (themeConfig = this.props.themeConfig) => {
+    return createRendererThemeConfig(
+      deepCopy(themeConfig),
+      this.props.config.rendererType,
+      this.getVisibleTerminalBackground()
+    )
+  }
+
   initTerminal = async () => {
     const { themeConfig, tab = {}, config = {} } = this.props
-    const tc = deepCopy(themeConfig)
-    tc.background = 'rgba(0,0,0,0)'
+    const tc = this.getRendererThemeConfig(themeConfig)
     const Terminal = await loadTerminal()
     const term = new Terminal({
       allowProposedApi: true,
@@ -1191,6 +1290,7 @@ class Term extends Component {
     term.parent = this
     term.onSelectionChange(this.onSelection)
     term.open(this.domRef.current, true)
+    this.registerTerminalColorQueryHandlers(term, themeConfig)
     await this.loadRenderer(term, config)
 
     const FitAddon = await loadFitAddon()
@@ -1416,7 +1516,7 @@ class Term extends Component {
   }
 
   openNormalBuffer = () => {
-    const normal = this.term.buffer._normal
+    const normal = this.term.buffer.normal
     const len = normal.length
     const lines = new Array(len).fill('').map((x, i) => {
       return normal.getLine(i).translateToString(false)
@@ -1578,13 +1678,12 @@ class Term extends Component {
     socket.onopen = async () => {
       await this.initAttachAddon()
       this.runInitScript()
-      term._initialized = true
     }
     // term.onRrefresh(this.onRefresh)
     term.onResize(this.onResizeTerminal)
-    if (pick(term, 'buffer._onBufferChange._listeners')) {
-      term.buffer._onBufferChange._listeners.push(this.onBufferChange)
-    }
+    // xterm 6.x exposes buffer change as a public event (IBufferNamespace.onBufferChange).
+    // Previously this reached into the private _onBufferChange._listeners array.
+    term.buffer.onBufferChange(this.onBufferChange)
     const WebLinksAddon = await loadWebLinksAddon()
     term.loadAddon(new WebLinksAddon(this.webLinkHandler))
     term.focus()
@@ -1754,6 +1853,23 @@ class Term extends Component {
     Object.assign(window.store.terminalInfoProps, infoProps)
   }
 
+  renderResetFontSizeButton = () => {
+    if (!this.state.fontSizeChanged) {
+      return null
+    }
+    const txt = `${e('reset')} ${e('fontSize')}`
+    return (
+      <Button
+        className='terminal-fontsize-reset'
+        onClick={this.handleResetFontSize}
+        type='default'
+        size='small'
+        title={txt}
+        icon={<AimOutlined />}
+      />
+    )
+  }
+
   // getPwd = async () => {
   //   const { sessionId, config } = this.props
   //   const { pid } = this.state
@@ -1853,6 +1969,7 @@ class Term extends Component {
           <ReconnectOverlay
             countdown={this.state.reconnectCountdown}
           />
+          {this.renderResetFontSizeButton()}
           <DropFileModal
             visible={this.state.dropFileModalVisible}
             files={this.state.droppedFiles}

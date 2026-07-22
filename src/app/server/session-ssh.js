@@ -16,6 +16,10 @@ const deepCopy = require('json-deep-copy')
 const { TerminalBase } = require('./session-base')
 const { commonExtends } = require('./session-common')
 const globalState = require('./global-state')
+const iconv = require('iconv-lite')
+
+// Encodings that are equivalent to UTF-8 (no conversion needed)
+const utf8Aliases = new Set(['utf-8', 'utf8', 'utf-8-strict'])
 
 const failMsg = 'All configured authentication methods failed'
 const csFailMsg = 'no matching C->S cipher'
@@ -163,18 +167,26 @@ class TerminalSshBase extends TerminalBase {
     })
   }
 
-  onKeyboardEvent (options) {
-    if (options?.mode !== 'confirm' && this.initOptions.interactiveValues) {
+  onKeyboardEvent (options, passwordOverride) {
+    if (options?.mode !== 'confirm' && this.initOptions?.interactiveValues) {
       return Promise.resolve(this.initOptions.interactiveValues.split('\n'))
     }
     // Auto-fill password prompt if we have a saved password
+    // passwordOverride is used during SSH connection hopping, where
+    // this.initOptions.password is the jump host's password (after
+    // adjustConnectionOrder swaps the options), not the target's.
+    // The caller passes connectOptions.password which is correct for
+    // the current connection being established.
     const { prompts } = options
-    if (prompts && prompts.length === 1 && this.initOptions.password) {
+    const savedPassword = passwordOverride !== undefined
+      ? passwordOverride
+      : this.initOptions?.password
+    if (prompts && prompts.length === 1 && savedPassword) {
       const prompt = prompts[0]
       const promptText = (prompt.prompt || '').toLowerCase()
       // Check if this is a password prompt (hidden input, contains "password" or is empty)
       if (!prompt.echo && (promptText.includes('password') || promptText === '')) {
-        return Promise.resolve([this.initOptions.password])
+        return Promise.resolve([savedPassword])
       }
     }
 
@@ -602,7 +614,7 @@ class TerminalSshBase extends TerminalBase {
           instructionsLang,
           prompts
         }
-        this.onKeyboardEvent(options)
+        this.onKeyboardEvent(options, connectOptions.password ?? this.initOptions?.password ?? null)
           .then(finish)
           .catch(reject)
       })
@@ -668,6 +680,9 @@ class TerminalSshBase extends TerminalBase {
     }
     if (initOptions.cipher && initOptions.cipher.length) {
       all.algorithms.cipher = deepCopy(initOptions.cipher)
+    }
+    if (initOptions.compress && initOptions.compress.length) {
+      all.algorithms.compress = deepCopy(initOptions.compress)
     }
     return all
   }
@@ -767,7 +782,7 @@ class TerminalSshBase extends TerminalBase {
     }
     if (
       this.sshKeys ||
-      (!connectOptions.privateKey && !connectOptions.password)
+      (!connectOptions.privateKey && !connectOptions.password && !initOptions.password)
     ) {
       this.getPrivateKey(this.connectOptions)
     }
@@ -889,6 +904,16 @@ class TerminalSshBase extends TerminalBase {
   }
 
   write (data) {
+    const encode = this.connectOptions?.encode || this.initOptions?.encode
+    if (encode && !utf8Aliases.has(encode.toLowerCase()) && typeof data === 'string') {
+      try {
+        const buf = iconv.encode(data, encode)
+        this.channel?.write(buf)
+        return
+      } catch (e) {
+        log.warn('iconv encode failed, falling back to raw write:', e.message)
+      }
+    }
     this.channel?.write(data)
   }
 
