@@ -51,7 +51,7 @@ jobs:
           else
             TARGET_TAG="$(
               git for-each-ref refs/tags/upstream --format='%(refname:strip=3)' |
-              rg '^v[0-9]+' |
+              grep -E '^v[0-9]+' |
               sort -V |
               tail -n 1
             )"

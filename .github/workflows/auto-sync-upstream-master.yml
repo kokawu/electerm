@@ -81,12 +81,11 @@ jobs:
           if [ -s /tmp/upstream-sync/overlap-files.txt ]; then
             {
               echo ""
-              echo "Sync stopped because upstream changed files that this fork also changes."
+              echo "Files changed by both upstream and this fork. Git merge will decide whether they actually conflict."
               echo ""
               echo "Overlapping files:"
               sed 's/^/- `/' /tmp/upstream-sync/overlap-files.txt | sed 's/$/`/'
             } >> "$GITHUB_STEP_SUMMARY"
-            exit 1
           fi
 
           echo "needs_sync=true" >> "$GITHUB_OUTPUT"
@@ -96,7 +95,19 @@ jobs:
         if: steps.safety.outputs.needs_sync == 'true'
         run: |
           git checkout -B auto/sync-upstream-master origin/master
-          git merge --no-ff --no-edit upstream/master
+          if git merge --no-ff --no-edit upstream/master; then
+            {
+              echo ""
+              echo "Merge completed without conflicts."
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            {
+              echo ""
+              echo "Merge failed with conflicts:"
+              git diff --name-only --diff-filter=U | sed 's/^/- `/' | sed 's/$/`/'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
 
       - name: Install dependencies
         if: steps.safety.outputs.needs_sync == 'true'
