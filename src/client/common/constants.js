@@ -14,9 +14,9 @@ const buildConst = (props) => {
   }, {})
 }
 
-export const logoPath1 = logoPath1Ref.replace(/^\//, '')
-export const logoPath2 = logoPath2Ref.replace(/^\//, '')
-export const logoPath3 = logoPath3Ref.replace(/^\//, '')
+export const logoPath1 = logoPath1Ref.replace(/^\//, '') + '?ver=' + packInfo.version
+export const logoPath2 = logoPath2Ref.replace(/^\//, '') + '?ver=' + packInfo.version
+export const logoPath3 = logoPath3Ref.replace(/^\//, '') + '?ver=' + packInfo.version
 export const maxEditFileSize = 1024 * 3000
 export const defaultBookmarkGroupId = 'default'
 export const newBookmarkIdPrefix = 'new-bookmark'
@@ -251,6 +251,7 @@ export const checkedKeysLsKey = 'checked-keys'
 export const quickCommandLabelsLsKey = 'quick-command-label'
 export const localAddrBookmarkLsKey = 'local-addr-bookmark-keys'
 export const dismissDelKeyTipLsKey = 'dismiss-del-key-tip'
+export const treeSortLsKey = 'tree-sort'
 export const sshTunnelHelpLink = 'https://github.com/electerm/electerm/wiki/How-to-use-ssh-tunnel'
 export const proxyHelpLink = 'https://github.com/electerm/electerm/wiki/proxy-format'
 export const regexHelpLink = 'https://github.com/electerm/electerm/wiki/Terminal-keywords-highlight-regular-expression-exmaples'
