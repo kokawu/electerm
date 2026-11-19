@@ -122,6 +122,19 @@ export const contextMenuMixin = {
     this[key]()
   },
 
+  onContextMenuCapture (e) {
+    if (e.button !== 2 || !e.shiftKey) {
+      return
+    }
+    e.preventDefault()
+    e.stopPropagation()
+    if (!this.state.loading) {
+      return this.onPaste().catch(err => {
+        console.error('Shift+right-click paste failed', err)
+      })
+    }
+  },
+
   onContextMenuInner (e) {
     const behavior = getRightClickBehavior(this.props.config)
     if (behavior === rightClickBehaviors.passthrough) {

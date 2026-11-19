@@ -432,6 +432,7 @@ class Term extends Component {
         zIndex: 10
       },
       onDrop: this.onDrop,
+      onContextMenuCapture: this.onContextMenuCapture,
       onContextMenu: this.onContextMenuInner,
       onTouchStart: this.onTouchStart,
       onTouchMove: this.onTouchMove,
