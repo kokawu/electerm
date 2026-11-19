@@ -17,8 +17,11 @@ async function main () {
   const src = 'win-x64-installer.exe'
   rm('-rf', 'dist')
   writeSrc(src)
-  await run(`${pb} --win nsis`)
-  await uploadToR2(src)
+  const noPublish = process.argv.includes('--no-publish')
+  await run(`${pb} --win nsis${noPublish ? ' --publish never' : ''}`)
+  if (!noPublish) {
+    await uploadToR2(src)
+  }
 }
 
 main()
