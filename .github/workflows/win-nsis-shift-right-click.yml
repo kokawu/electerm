@@ -3,6 +3,8 @@ name: Windows NSIS (Shift + right-click)
 on:
   push:
     branches: [build/shift-right-click-nsis]
+    paths-ignore:
+      - '.github/workflows/win-nsis-shift-right-click.yml'
 
 permissions:
   contents: read
@@ -46,3 +48,29 @@ jobs:
           path: dist/*-installer.exe
           if-no-files-found: error
           retention-days: 30
+
+  publish-release:
+    needs: build-windows
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: electerm-windows-shift-right-click-x64
+          path: release-assets
+      - name: Publish installer to GitHub Releases
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          files=(release-assets/*-installer.exe)
+          [[ ${#files[@]} -eq 1 && -s "${files[0]}" ]]
+          pattern="^electerm-([0-9]+[.][0-9]+[.][0-9]+)-win-x64-installer[.]exe$"
+          [[ ${files[0]##*/} =~ $pattern ]]
+          tag="v${BASH_REMATCH[1]}-kokawu.$GITHUB_RUN_NUMBER"
+          gh release create "$tag" "${files[0]}" --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" --title "$tag" --notes 'Windows x64 NSIS installer with Shift + right-click paste. OSC 52 uses the upstream implementation.'
